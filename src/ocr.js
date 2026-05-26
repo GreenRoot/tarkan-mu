@@ -129,8 +129,8 @@ function matchGrid(grid, templates, GW, GH) {
 }
 
 // --- ПУБЛИЧНОЕ --------------------------------------------------------------
-// прочитать число из области; ok:false если калибровки нет/неуверенно/окно закрыто
-export async function readNumber(maxErr = 0.28) {
+// прочитать число из области; ok:false если калибровки нет/неуверенно/окно закрыто/вне лимита
+export async function readNumber({ maxErr = 0.28, max = Infinity } = {}) {
   const { GW, GH, templates } = ocrState;
   if (!ocrState.region) return { ok: false, reason: 'нет области' };
   if (!Object.keys(templates).length) return { ok: false, reason: 'нет калибровки' };
@@ -140,11 +140,13 @@ export async function readNumber(maxErr = 0.28) {
   let str = '', err = 0;
   for (const b of boxes) {
     const m = matchGrid(normBox(bin, b, GW, GH), templates, GW, GH);
-    if (m.digit == null || m.err > maxErr) return { ok: false, reason: 'неуверенно' };
+    if (m.digit == null || m.err > maxErr) return { ok: false, reason: 'неуверенно', err: m.err };
     str += m.digit; err = Math.max(err, m.err);
   }
   const value = parseInt(str, 10);
-  return Number.isFinite(value) ? { ok: true, value, str, err } : { ok: false, reason: 'не число' };
+  if (!Number.isFinite(value)) return { ok: false, reason: 'не число' };
+  if (value > max) return { ok: false, reason: `${value} > лимита ${max}`, value, suspect: true };
+  return { ok: true, value, str, err };
 }
 
 // обучить: known — число, реально видимое в рамке сейчас (напр. "380")

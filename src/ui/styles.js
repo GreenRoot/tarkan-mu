@@ -33,6 +33,8 @@ export const CSS = `
   #tarkan-bot-ui .go:hover{background:#1a5c40}
   #tarkan-bot-ui .lbl{flex:0 0 auto;color:#6f87a0;padding:0 1px}
   #tarkan-bot-ui .ocrval{flex:1;text-align:right;color:#9bd9c4;font-weight:700}
+  #tarkan-ocr-box{position:fixed;z-index:2147483646;pointer-events:none;display:none;
+    border:1px solid #5fe0c0;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 6px rgba(95,224,192,.5)}
   #tarkan-bot-ui .big{width:100%;margin-top:9px;padding:9px;font-weight:700;letter-spacing:.6px;
     background:linear-gradient(180deg,#8a2222,#681616);border-color:#c44;color:#ffe6e0}
   #tarkan-bot-ui .big:hover{background:linear-gradient(180deg,#a82a2a,#7e1e1e)}

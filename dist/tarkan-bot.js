@@ -1,4 +1,4 @@
-// tarkan-bot v1.0.0 — собрано из src/. Вставить целиком в консоль DevTools (F12).
+// tarkan-bot v1.1.0 — собрано из src/. Вставить целиком в консоль DevTools (F12).
 (() => {
   // src/keyboard.js
   var TARGET = typeof document !== "undefined" && document.getElementById("canvas") || (typeof window !== "undefined" ? window : null);
@@ -340,7 +340,7 @@
     }
     return { digit: best, err: bestErr / (GW * GH) };
   }
-  async function readNumber(maxErr = 0.28) {
+  async function readNumber({ maxErr = 0.28, max = Infinity } = {}) {
     const { GW, GH, templates } = ocrState;
     if (!ocrState.region) return { ok: false, reason: "нет области" };
     if (!Object.keys(templates).length) return { ok: false, reason: "нет калибровки" };
@@ -350,12 +350,14 @@
     let str = "", err = 0;
     for (const b of boxes) {
       const m = matchGrid(normBox(bin, b, GW, GH), templates, GW, GH);
-      if (m.digit == null || m.err > maxErr) return { ok: false, reason: "неуверенно" };
+      if (m.digit == null || m.err > maxErr) return { ok: false, reason: "неуверенно", err: m.err };
       str += m.digit;
       err = Math.max(err, m.err);
     }
     const value = parseInt(str, 10);
-    return Number.isFinite(value) ? { ok: true, value, str, err } : { ok: false, reason: "не число" };
+    if (!Number.isFinite(value)) return { ok: false, reason: "не число" };
+    if (value > max) return { ok: false, reason: `${value} > лимита ${max}`, value, suspect: true };
+    return { ok: true, value, str, err };
   }
   async function teach(known) {
     known = String(known).trim();
@@ -432,6 +434,8 @@
   #tarkan-bot-ui .go:hover{background:#1a5c40}
   #tarkan-bot-ui .lbl{flex:0 0 auto;color:#6f87a0;padding:0 1px}
   #tarkan-bot-ui .ocrval{flex:1;text-align:right;color:#9bd9c4;font-weight:700}
+  #tarkan-ocr-box{position:fixed;z-index:2147483646;pointer-events:none;display:none;
+    border:1px solid #5fe0c0;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 6px rgba(95,224,192,.5)}
   #tarkan-bot-ui .big{width:100%;margin-top:9px;padding:9px;font-weight:700;letter-spacing:.6px;
     background:linear-gradient(180deg,#8a2222,#681616);border-color:#c44;color:#ffe6e0}
   #tarkan-bot-ui .big:hover{background:linear-gradient(180deg,#a82a2a,#7e1e1e)}
@@ -451,12 +455,42 @@
 
   // src/ui/panel.js
   function buildUI() {
+    if (window.__tarkanStop) {
+      try {
+        window.__tarkanStop();
+      } catch (e) {
+      }
+    }
     document.getElementById("tarkan-bot-ui")?.remove();
+    document.getElementById("tarkan-ocr-box")?.remove();
     document.head.appendChild(el("style", {}, CSS));
     const logEl = el("div", { class: "log" }, "готов · жми кнопку");
     const log = (m) => {
       logEl.textContent = m;
     };
+    const ttlEl = el("span", { class: "ttl" }, "⚡ tarkan-bot");
+    const setLevel = (v) => {
+      ttlEl.textContent = v == null ? "⚡ tarkan-bot" : `⚡ tarkan-bot · ур ${v}`;
+    };
+    const hlBox = el("div", { id: "tarkan-ocr-box", class: "ocrbox" });
+    document.body.appendChild(hlBox);
+    let hlOn = true;
+    const placeHighlight = () => {
+      const reg = ocrState.region, canvas = document.getElementById("canvas");
+      if (!reg || !canvas || !hlOn) {
+        hlBox.style.display = "none";
+        return;
+      }
+      const r = canvas.getBoundingClientRect();
+      const sx = r.width / canvas.width, sy = r.height / canvas.height;
+      hlBox.style.display = "block";
+      hlBox.style.left = r.left + reg.x * sx + "px";
+      hlBox.style.top = r.top + reg.y * sy + "px";
+      hlBox.style.width = reg.w * sx + "px";
+      hlBox.style.height = reg.h * sy + "px";
+    };
+    addEventListener("resize", placeHighlight);
+    addEventListener("scroll", placeHighlight, true);
     const iCmd = el("input", { value: "/reset" });
     const iAfter = el("input", { class: "sm", value: String(TIMING.afterReset) });
     timingInputs.afterReset = iAfter;
@@ -597,14 +631,17 @@
       if (auto !== null) scheduleNext();
     };
     const iLvl = el("input", { class: "sm", value: "380" });
+    const iMax = el("input", { class: "sm", value: "400" });
     const iPoll = el("input", { class: "sm", value: "3" });
-    [iLvl, iPoll].forEach(makeEditable);
+    [iLvl, iMax, iPoll].forEach(makeEditable);
     const ocrVal = el("span", { class: "ocrval" }, ocrState.region ? "—" : "нет обл.");
+    const readMax = () => +iMax.value || 400;
     const bRegion = el("button", { onclick: async () => {
       log("тяни рамку по числу (Esc — отмена)");
       const r = await pickRegion();
       log(r ? `область ${r.w}×${r.h}` : "отмена");
       ocrVal.textContent = r ? "—" : "нет обл.";
+      placeHighlight();
     } }, "обл.");
     const bTeach = el("button", { onclick: async () => {
       const known = prompt("Какое число сейчас в рамке? (обучение цифр)");
@@ -613,10 +650,22 @@
       log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
     } }, "учить");
     const bTest = el("button", { onclick: async () => {
-      const r = await readNumber();
-      ocrVal.textContent = r.ok ? String(r.value) : "—";
-      log(r.ok ? `прочитано: ${r.value} (err ${Math.round(r.err * 100)}%)` : `OCR: ${r.reason}`);
+      const r = await readNumber({ max: readMax() });
+      placeHighlight();
+      if (r.ok) {
+        ocrVal.textContent = String(r.value);
+        setLevel(r.value);
+        log(`прочитано: ${r.value} (err ${Math.round(r.err * 100)}%)`);
+      } else {
+        ocrVal.textContent = r.suspect ? `?${r.value}` : "—";
+        log(`OCR: ${r.reason}`);
+      }
     } }, "тест");
+    const bEye = el("button", { onclick: () => {
+      hlOn = !hlOn;
+      bEye.textContent = hlOn ? "👁" : "🚫";
+      placeHighlight();
+    } }, "👁");
     let ocrIv = null, ocrBusy = false;
     const bLvlAuto = el("button", { class: "run" }, "▶ ресет по ур.");
     bLvlAuto.onclick = () => {
@@ -644,13 +693,15 @@
         if (ocrBusy) return;
         ocrBusy = true;
         try {
-          const r = await readNumber();
+          const r = await readNumber({ max: readMax() });
+          placeHighlight();
           if (!r.ok) {
-            ocrVal.textContent = "закрыто?";
-            log(`окно уровней не читается: ${r.reason}`);
+            ocrVal.textContent = r.suspect ? `?${r.value}` : "закрыто?";
+            log(`ур не читается: ${r.reason}`);
             return;
           }
           ocrVal.textContent = String(r.value);
+          setLevel(r.value);
           const th = +iLvl.value || 380;
           if (r.value >= th) {
             log(`ур ${r.value} ≥ ${th} → RESET MZFK`);
@@ -664,8 +715,7 @@
       }, sec2 * 1e3);
     };
     const icMin = el("span", { class: "ic", title: "свернуть" }, "▾");
-    const icClose = el("span", { class: "ic", title: "закрыть" }, "✕");
-    const hd = el("div", { class: "hd" }, el("span", { class: "ttl" }, "⚡ tarkan-bot"), icMin, icClose);
+    const hd = el("div", { class: "hd" }, ttlEl, icMin);
     const sec = (t) => el("div", { class: "sec" }, t);
     const lbl = (t) => el("span", { class: "lbl" }, t);
     const body = el(
@@ -686,8 +736,8 @@
       countEl,
       bAuto,
       sec("чтение экрана (OCR)"),
-      el("div", { class: "row" }, bRegion, bTeach, bTest, lbl("="), ocrVal),
-      el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("опрос"), iPoll, lbl("с")),
+      el("div", { class: "row" }, bRegion, bTeach, bTest, bEye, lbl("="), ocrVal),
+      el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("≤"), iMax, lbl("опрос"), iPoll, lbl("с")),
       bLvlAuto,
       statsEl,
       logEl
@@ -702,38 +752,35 @@
     const probe = (e) => log(`${e.type} which=${e.which} key="${e.key}"`);
     addEventListener("keydown", probe, true);
     addEventListener("keypress", probe, true);
-    icClose.onclick = () => {
-      if (auto !== null) {
-        clearTimeout(auto);
-        clearInterval(countIv);
-        auto = null;
-      }
-      if (ocrIv) {
-        clearInterval(ocrIv);
-        ocrIv = null;
-      }
-      removeEventListener("keydown", probe, true);
-      removeEventListener("keypress", probe, true);
-      STAT_KEYS.forEach((k) => {
-        delete statInputs[k];
-        delete incInputs[k];
-      });
-      timingInputs.afterReset = timingInputs.gap = void 0;
-      ui.remove();
-    };
     let drag = null;
     hd.onmousedown = (e) => {
-      if (e.target === icMin || e.target === icClose) return;
+      if (e.target === icMin) return;
       drag = { x: e.clientX, y: e.clientY, l: ui.offsetLeft, t: ui.offsetTop };
       e.preventDefault();
     };
-    addEventListener("mousemove", (e) => {
+    const onMove = (e) => {
       if (!drag) return;
       ui.style.left = drag.l + e.clientX - drag.x + "px";
       ui.style.top = drag.t + e.clientY - drag.y + "px";
       ui.style.bottom = "auto";
-    });
-    addEventListener("mouseup", () => drag = null);
+      placeHighlight();
+    };
+    const onUp = () => drag = null;
+    addEventListener("mousemove", onMove);
+    addEventListener("mouseup", onUp);
+    placeHighlight();
+    window.__tarkanStop = () => {
+      if (auto !== null) clearTimeout(auto);
+      clearInterval(countIv);
+      if (ocrIv) clearInterval(ocrIv);
+      removeEventListener("keydown", probe, true);
+      removeEventListener("keypress", probe, true);
+      removeEventListener("resize", placeHighlight);
+      removeEventListener("scroll", placeHighlight, true);
+      removeEventListener("mousemove", onMove);
+      removeEventListener("mouseup", onUp);
+      document.getElementById("tarkan-ocr-box")?.remove();
+    };
   }
 
   // src/main.js
