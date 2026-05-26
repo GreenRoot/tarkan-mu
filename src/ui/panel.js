@@ -5,7 +5,7 @@ import { el, makeEditable } from './dom.js';
 import CSS from './styles.css';
 import { STAT_KEYS, STAT_DEFAULTS, INC_DEFAULTS, TIMING, AUTO_BASE, AUTO_STEP } from '../config.js';
 import { statInputs, incInputs, timingInputs, statVal, incVal } from '../state.js';
-import { focusGame, ENTER, ESCAPE } from '../keyboard.js';
+import { focusGame, ENTER, ESCAPE, press } from '../keyboard.js';
 import { chatCommand } from '../chat.js';
 import { resetMzfk } from '../macro.js';
 import { showShot } from '../screenshot.js';
@@ -56,7 +56,8 @@ export function buildUI() {
   const iPoll  = el('input', { class: 'sm', value: '3' });    // опрос, сек
   const iErr   = el('input', { class: 'sm', value: '12' });   // макс ошибка совпадения, % (серошкала)
   const iThr   = el('input', { class: 'sm', value: '0' });    // ручной порог бинаризации (0=авто)
-  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr].forEach(makeEditable);
+  const iLost  = el('input', { class: 'sm', value: '5' });    // нет уровня N сек -> нажать C
+  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
   const readMax = () => +iMax.value || 400;
   const readErr = () => (+iErr.value || 12) / 100;
   const readThr = () => +iThr.value || 0;
@@ -177,12 +178,23 @@ export function buildUI() {
     if (!Object.keys(ocrState.templates).length) { log('сначала откалибруй (вкладка OCR → учить)'); return; }
     const s = Math.max(1, +iPoll.value || 3);
     bLvlAuto.classList.add('on'); bLvlAuto.textContent = '⏹ стоп ур.'; log('ур-авто старт'); heartbeat();
+    let lastOk = Date.now();                      // когда последний раз читали уровень
     ocrIv = setInterval(async () => {
       if (ocrBusy) return; ocrBusy = true;
       try {
         const r = await readNumber({ maxErr: readErr(), max: readMax() });
         placeHighlight();
-        if (!r.ok) { ocrVal.textContent = r.suspect ? `?${r.value}` : 'закрыто?'; log(`ур не читается: ${r.reason}`); return; }
+        if (!r.ok) {                                // не видим уровень
+          ocrVal.textContent = r.suspect ? `?${r.value}` : 'закрыто?';
+          const lost = Math.max(1, +iLost.value || 5) * 1000;
+          if (Date.now() - lastOk >= lost) {        // долго нет -> пробуем открыть окно (C)
+            log('нет уровня → жму C');
+            focusGame(); press('c', 67, 'KeyC');
+            lastOk = Date.now();                    // ждём ещё интервал перед повтором
+          } else { log(`ур не читается: ${r.reason}`); }
+          return;
+        }
+        lastOk = Date.now();
         ocrVal.textContent = String(r.value); setLevel(r.value);
         const th = +iLvl.value || 380;
         if (r.value >= th) { log(`ур ${r.value} ≥ ${th} → RESET MZFK`); await doReset(); }
@@ -292,6 +304,7 @@ export function buildUI() {
     sec('ресет по уровню (OCR)'),
     el('div', { class: 'row' }, lbl('ур ≥'), iLvl, lbl('≤'), iMax),
     el('div', { class: 'row' }, lbl('опрос'), iPoll, lbl('с'), lbl('ошибка ≤'), iErr, lbl('%')),
+    el('div', { class: 'row' }, lbl('нет ур →C через'), iLost, lbl('с')),
     bLvlAuto,
   );
   const paneOcr = el('div', { class: 'pane' },
@@ -348,7 +361,7 @@ export function buildUI() {
   const CFG = 'tarkanbot.cfg';
   const cfgMap = () => ({
     cmd: iCmd, after: iAfter, gap: iGap, base: iBase, step: iStep,
-    lvl: iLvl, max: iMax, poll: iPoll, err: iErr, thr: iThr,
+    lvl: iLvl, max: iMax, poll: iPoll, err: iErr, thr: iThr, lost: iLost,
     ...Object.fromEntries(STAT_KEYS.map(k => ['s_' + k, statInputs[k]])),
     ...Object.fromEntries(STAT_KEYS.map(k => ['i_' + k, incInputs[k]])),
   });

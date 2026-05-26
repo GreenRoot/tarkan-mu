@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tarkan-bot
 // @namespace    tarkan.gg
-// @version      1.5.0
+// @version      1.6.0
 // @description  MU online: авто-ресет, раздача статов, скриншот canvas
 // @author       Санёк
 // @match        *://tarkan.gg/*
@@ -523,7 +523,8 @@
     const iPoll = el("input", { class: "sm", value: "3" });
     const iErr = el("input", { class: "sm", value: "12" });
     const iThr = el("input", { class: "sm", value: "0" });
-    [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr].forEach(makeEditable);
+    const iLost = el("input", { class: "sm", value: "5" });
+    [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
     const readMax = () => +iMax.value || 400;
     const readErr = () => (+iErr.value || 12) / 100;
     const readThr = () => +iThr.value || 0;
@@ -709,6 +710,7 @@
       bLvlAuto.textContent = "⏹ стоп ур.";
       log("ур-авто старт");
       heartbeat();
+      let lastOk = Date.now();
       ocrIv = setInterval(async () => {
         if (ocrBusy) return;
         ocrBusy = true;
@@ -717,9 +719,18 @@
           placeHighlight();
           if (!r.ok) {
             ocrVal.textContent = r.suspect ? `?${r.value}` : "закрыто?";
-            log(`ур не читается: ${r.reason}`);
+            const lost = Math.max(1, +iLost.value || 5) * 1e3;
+            if (Date.now() - lastOk >= lost) {
+              log("нет уровня → жму C");
+              focusGame();
+              press("c", 67, "KeyC");
+              lastOk = Date.now();
+            } else {
+              log(`ур не читается: ${r.reason}`);
+            }
             return;
           }
+          lastOk = Date.now();
           ocrVal.textContent = String(r.value);
           setLevel(r.value);
           const th = +iLvl.value || 380;
@@ -879,6 +890,7 @@
       sec("ресет по уровню (OCR)"),
       el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("≤"), iMax),
       el("div", { class: "row" }, lbl("опрос"), iPoll, lbl("с"), lbl("ошибка ≤"), iErr, lbl("%")),
+      el("div", { class: "row" }, lbl("нет ур →C через"), iLost, lbl("с")),
       bLvlAuto
     );
     const paneOcr = el(
@@ -952,6 +964,7 @@
       poll: iPoll,
       err: iErr,
       thr: iThr,
+      lost: iLost,
       ...Object.fromEntries(STAT_KEYS.map((k) => ["s_" + k, statInputs[k]])),
       ...Object.fromEntries(STAT_KEYS.map((k) => ["i_" + k, incInputs[k]]))
     });
