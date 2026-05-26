@@ -129,35 +129,61 @@ function matchGrid(grid, templates, GW, GH) {
 }
 
 // --- ПУБЛИЧНОЕ --------------------------------------------------------------
+// отбросить мелочь (двоеточие/точки) — боксы заметно ниже самого высокого
+function dropSmall(boxes) {
+  if (!boxes.length) return boxes;
+  const maxH = Math.max(...boxes.map(b => b.y1 - b.y0));
+  return boxes.filter(b => (b.y1 - b.y0) >= 0.5 * maxH);
+}
+
 // прочитать число из области; ok:false если калибровки нет/неуверенно/окно закрыто/вне лимита
+// Логика анти-мусора: метка "Уровень:" слева от числа. Берём только боксы,
+// похожие на выученную цифру (err<=maxErr), затем правейшую группу (метка отделена зазором).
 export async function readNumber({ maxErr = 0.28, max = Infinity } = {}) {
   const { GW, GH, templates } = ocrState;
   if (!ocrState.region) return { ok: false, reason: 'нет области' };
   if (!Object.keys(templates).length) return { ok: false, reason: 'нет калибровки' };
   const bin = binarize(await regionImageData());
-  const boxes = segment(bin);
+  const boxes = dropSmall(segment(bin));
   if (!boxes.length) return { ok: false, reason: 'цифр не видно (окно закрыто?)' };
-  let str = '', err = 0;
+
+  // оставляем только боксы, уверенно похожие на цифру
+  const cand = [];
   for (const b of boxes) {
     const m = matchGrid(normBox(bin, b, GW, GH), templates, GW, GH);
-    if (m.digit == null || m.err > maxErr) return { ok: false, reason: 'неуверенно', err: m.err };
-    str += m.digit; err = Math.max(err, m.err);
+    if (m.digit != null && m.err <= maxErr) cand.push({ b, digit: m.digit, err: m.err });
   }
+  if (!cand.length) return { ok: false, reason: 'цифр не распознано' };
+
+  // кластеризация по горизонтальному разрыву; правейший кластер = число (метка левее)
+  const avgW = cand.reduce((s, o) => s + (o.b.x1 - o.b.x0), 0) / cand.length;
+  const clusters = [[cand[0]]];
+  for (let i = 1; i < cand.length; i++) {
+    const gap = cand[i].b.x0 - cand[i - 1].b.x1;
+    if (gap > 1.5 * avgW) clusters.push([cand[i]]);
+    else clusters[clusters.length - 1].push(cand[i]);
+  }
+  const group = clusters[clusters.length - 1];
+  const str = group.map(o => o.digit).join('');
+  const err = Math.max(...group.map(o => o.err));
+
   const value = parseInt(str, 10);
   if (!Number.isFinite(value)) return { ok: false, reason: 'не число' };
   if (value > max) return { ok: false, reason: `${value} > лимита ${max}`, value, suspect: true };
   return { ok: true, value, str, err };
 }
 
-// обучить: known — число, реально видимое в рамке сейчас (напр. "380")
+// обучить: known — число, реально видимое в рамке (напр. "380").
+// Берём правейшие N боксов (N = длина числа) — метка "Уровень:" слева игнорируется.
 export async function teach(known) {
   known = String(known).trim();
   if (!/^\d+$/.test(known)) return { ok: false, reason: 'нужны только цифры' };
   const bin = binarize(await regionImageData());
-  const boxes = segment(bin);
-  if (boxes.length !== known.length) return { ok: false, reason: `сегментов ${boxes.length}, цифр ${known.length}` };
+  const boxes = dropSmall(segment(bin));
+  if (boxes.length < known.length) return { ok: false, reason: `боксов ${boxes.length} < цифр ${known.length}` };
+  const use = boxes.slice(boxes.length - known.length);   // правейшие N = цифры
   const { GW, GH } = ocrState;
-  for (let i = 0; i < boxes.length; i++) ocrState.templates[known[i]] = Array.from(normBox(bin, boxes[i], GW, GH));
+  for (let i = 0; i < use.length; i++) ocrState.templates[known[i]] = Array.from(normBox(bin, use[i], GW, GH));
   save();
   return { ok: true, learned: Object.keys(ocrState.templates).sort().join('') };
 }
