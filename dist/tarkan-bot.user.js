@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tarkan-bot
 // @namespace    tarkan.gg
-// @version      1.2.0
+// @version      1.2.1
 // @description  MU online: авто-ресет, раздача статов, скриншот canvas
 // @author       Санёк
 // @match        *://tarkan.gg/*
@@ -357,7 +357,7 @@
     const maxH = Math.max(...boxes.map((b) => b.y1 - b.y0));
     return boxes.filter((b) => b.y1 - b.y0 >= 0.5 * maxH);
   }
-  async function readNumber({ maxErr = 0.28, max = Infinity } = {}) {
+  async function readNumber({ maxErr = 0.2, max = Infinity } = {}) {
     const { GW, GH, templates } = ocrState;
     if (!ocrState.region) return { ok: false, reason: "нет области" };
     if (!Object.keys(templates).length) return { ok: false, reason: "нет калибровки" };
@@ -611,9 +611,11 @@
     const iLvl = el("input", { class: "sm", value: "380" });
     const iMax = el("input", { class: "sm", value: "400" });
     const iPoll = el("input", { class: "sm", value: "3" });
-    [iLvl, iMax, iPoll].forEach(makeEditable);
+    const iErr = el("input", { class: "sm", value: "18" });
+    [iLvl, iMax, iPoll, iErr].forEach(makeEditable);
     const ocrVal = el("span", { class: "ocrval" }, ocrState.region ? "—" : "нет обл.");
     const readMax = () => +iMax.value || 400;
+    const readErr = () => (+iErr.value || 18) / 100;
     const bRegion = el("button", { onclick: async () => {
       log("тяни рамку по числу (Esc — отмена)");
       const r = await pickRegion();
@@ -628,7 +630,7 @@
       log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
     } }, "учить");
     const bTest = el("button", { onclick: async () => {
-      const r = await readNumber({ max: readMax() });
+      const r = await readNumber({ maxErr: readErr(), max: readMax() });
       placeHighlight();
       if (r.ok) {
         ocrVal.textContent = String(r.value);
@@ -671,7 +673,7 @@
         if (ocrBusy) return;
         ocrBusy = true;
         try {
-          const r = await readNumber({ max: readMax() });
+          const r = await readNumber({ maxErr: readErr(), max: readMax() });
           placeHighlight();
           if (!r.ok) {
             ocrVal.textContent = r.suspect ? `?${r.value}` : "закрыто?";
@@ -716,6 +718,7 @@
       sec("чтение экрана (OCR)"),
       el("div", { class: "row" }, bRegion, bTeach, bTest, bEye, lbl("="), ocrVal),
       el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("≤"), iMax, lbl("опрос"), iPoll, lbl("с")),
+      el("div", { class: "row" }, lbl("ошибка ≤"), iErr, lbl("%")),
       bLvlAuto,
       statsEl,
       logEl

@@ -144,9 +144,11 @@ export function buildUI() {
   const iLvl  = el('input', { class: 'sm', value: '380' });  // порог уровня
   const iMax  = el('input', { class: 'sm', value: '400' });  // лимит: больше = мусорное чтение
   const iPoll = el('input', { class: 'sm', value: '3' });    // опрос, сек
-  [iLvl, iMax, iPoll].forEach(makeEditable);
+  const iErr  = el('input', { class: 'sm', value: '18' });   // макс ошибка совпадения, %
+  [iLvl, iMax, iPoll, iErr].forEach(makeEditable);
   const ocrVal = el('span', { class: 'ocrval' }, ocrState.region ? '—' : 'нет обл.');
   const readMax = () => +iMax.value || 400;
+  const readErr = () => (+iErr.value || 18) / 100;
 
   const bRegion = el('button', { onclick: async () => {
     log('тяни рамку по числу (Esc — отмена)');
@@ -162,7 +164,7 @@ export function buildUI() {
     log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
   } }, 'учить');
   const bTest = el('button', { onclick: async () => {
-    const r = await readNumber({ max: readMax() });
+    const r = await readNumber({ maxErr: readErr(), max: readMax() });
     placeHighlight();
     if (r.ok) { ocrVal.textContent = String(r.value); setLevel(r.value); log(`прочитано: ${r.value} (err ${Math.round(r.err * 100)}%)`); }
     else { ocrVal.textContent = r.suspect ? `?${r.value}` : '—'; log(`OCR: ${r.reason}`); }
@@ -185,7 +187,7 @@ export function buildUI() {
     ocrIv = setInterval(async () => {
       if (ocrBusy) return; ocrBusy = true;
       try {
-        const r = await readNumber({ max: readMax() });
+        const r = await readNumber({ maxErr: readErr(), max: readMax() });
         placeHighlight();
         if (!r.ok) {                                   // окно закрыто / мусор / вне лимита -> НЕ ресетим
           ocrVal.textContent = r.suspect ? `?${r.value}` : 'закрыто?';
@@ -220,6 +222,7 @@ export function buildUI() {
     sec('чтение экрана (OCR)'),
     el('div', { class: 'row' }, bRegion, bTeach, bTest, bEye, lbl('='), ocrVal),
     el('div', { class: 'row' }, lbl('ур ≥'), iLvl, lbl('≤'), iMax, lbl('опрос'), iPoll, lbl('с')),
+    el('div', { class: 'row' }, lbl('ошибка ≤'), iErr, lbl('%')),
     bLvlAuto,
     statsEl,
     logEl,

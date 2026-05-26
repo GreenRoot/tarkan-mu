@@ -139,7 +139,7 @@ function dropSmall(boxes) {
 // прочитать число из области; ok:false если калибровки нет/неуверенно/окно закрыто/вне лимита
 // Логика анти-мусора: метка "Уровень:" слева от числа. Берём только боксы,
 // похожие на выученную цифру (err<=maxErr), затем правейшую группу (метка отделена зазором).
-export async function readNumber({ maxErr = 0.28, max = Infinity } = {}) {
+export async function readNumber({ maxErr = 0.2, max = Infinity } = {}) {
   const { GW, GH, templates } = ocrState;
   if (!ocrState.region) return { ok: false, reason: 'нет области' };
   if (!Object.keys(templates).length) return { ok: false, reason: 'нет калибровки' };
