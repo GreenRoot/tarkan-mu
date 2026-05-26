@@ -20,6 +20,8 @@ const userScriptBanner = `// ==UserScript==
 // @match        *://*.tarkan.gg/*
 // @run-at       document-idle
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/GreenRoot/tarkan-mu/main/dist/tarkan-bot.user.js
+// @updateURL    https://raw.githubusercontent.com/GreenRoot/tarkan-mu/main/dist/tarkan-bot.user.js
 // ==/UserScript==`;
 
 const common = {
