@@ -9,6 +9,7 @@ import { focusGame, ENTER, ESCAPE } from '../keyboard.js';
 import { chatCommand } from '../chat.js';
 import { resetMzfk } from '../macro.js';
 import { showShot } from '../screenshot.js';
+import { ocrState, pickRegion, readNumber, teach } from '../ocr.js';
 
 export function buildUI() {
   document.getElementById('tarkan-bot-ui')?.remove();        // не плодим копии
@@ -115,6 +116,55 @@ export function buildUI() {
     if (auto !== null) scheduleNext();
   };
 
+  // --- OCR: чтение числа из области + ресет по уровню ------------------------
+  const iLvl  = el('input', { class: 'sm', value: '380' });  // порог уровня
+  const iPoll = el('input', { class: 'sm', value: '3' });    // опрос, сек
+  [iLvl, iPoll].forEach(makeEditable);
+  const ocrVal  = el('span', { class: 'ocrval' }, ocrState.region ? '—' : 'нет обл.');
+
+  const bRegion = el('button', { onclick: async () => {
+    log('тяни рамку по числу (Esc — отмена)');
+    const r = await pickRegion();
+    log(r ? `область ${r.w}×${r.h}` : 'отмена');
+    ocrVal.textContent = r ? '—' : 'нет обл.';
+  } }, 'обл.');
+  const bTeach = el('button', { onclick: async () => {
+    const known = prompt('Какое число сейчас в рамке? (обучение цифр)'); // фокус панели ок: в игру не печатаем
+    if (!known) return;
+    const res = await teach(known);
+    log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
+  } }, 'учить');
+  const bTest = el('button', { onclick: async () => {
+    const r = await readNumber();
+    ocrVal.textContent = r.ok ? String(r.value) : '—';
+    log(r.ok ? `прочитано: ${r.value} (err ${Math.round(r.err * 100)}%)` : `OCR: ${r.reason}`);
+  } }, 'тест');
+
+  // авто: опрашиваем уровень; если окно закрыто — пишем; если >= порога — RESET
+  let ocrIv = null, ocrBusy = false;
+  const bLvlAuto = el('button', { class: 'run' }, '▶ ресет по ур.');
+  bLvlAuto.onclick = () => {
+    if (ocrIv) {
+      clearInterval(ocrIv); ocrIv = null;
+      bLvlAuto.classList.remove('on'); bLvlAuto.textContent = '▶ ресет по ур.'; log('ур-авто стоп'); return;
+    }
+    if (!ocrState.region) { log('сначала задай область (обл.)'); return; }
+    if (!Object.keys(ocrState.templates).length) { log('сначала откалибруй (учить)'); return; }
+    const sec = Math.max(1, +iPoll.value || 3);
+    bLvlAuto.classList.add('on'); bLvlAuto.textContent = '⏹ стоп ур.'; log('ур-авто старт');
+    ocrIv = setInterval(async () => {
+      if (ocrBusy) return; ocrBusy = true;
+      try {
+        const r = await readNumber();
+        if (!r.ok) { ocrVal.textContent = 'закрыто?'; log(`окно уровней не читается: ${r.reason}`); return; }
+        ocrVal.textContent = String(r.value);
+        const th = +iLvl.value || 380;
+        if (r.value >= th) { log(`ур ${r.value} ≥ ${th} → RESET MZFK`); await doReset(); }
+      } catch (e) { log('OCR ошибка'); }
+      finally { ocrBusy = false; }
+    }, sec * 1000);
+  };
+
   // --- шапка: title + свернуть + закрыть -------------------------------------
   const icMin   = el('span', { class: 'ic', title: 'свернуть' }, '▾');
   const icClose = el('span', { class: 'ic', title: 'закрыть' }, '✕');
@@ -134,6 +184,10 @@ export function buildUI() {
     el('div', { class: 'row' }, lbl('база'), iBase, lbl('+ за ресет'), iStep),
     countEl,
     bAuto,
+    sec('чтение экрана (OCR)'),
+    el('div', { class: 'row' }, bRegion, bTeach, bTest, lbl('='), ocrVal),
+    el('div', { class: 'row' }, lbl('ур ≥'), iLvl, lbl('опрос'), iPoll, lbl('с')),
+    bLvlAuto,
     statsEl,
     logEl,
   );
@@ -153,6 +207,7 @@ export function buildUI() {
   addEventListener('keypress', probe, true);
   icClose.onclick = () => {
     if (auto !== null) { clearTimeout(auto); clearInterval(countIv); auto = null; }   // глушим авто-цикл
+    if (ocrIv) { clearInterval(ocrIv); ocrIv = null; }                                // и опрос уровня
     removeEventListener('keydown',  probe, true);
     removeEventListener('keypress', probe, true);
     STAT_KEYS.forEach(k => { delete statInputs[k]; delete incInputs[k]; });

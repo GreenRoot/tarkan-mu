@@ -23,21 +23,28 @@ function shotViaRAF() {
       const s = window.__shot; window.__shot = null; res(s); } }, 16); });
 }
 
-// ОСНОВНОЙ путь: captureStream + ImageCapture.grabFrame
-export async function shotBlob() {
+// ImageBitmap текущего кадра (для OCR/анализа пикселей). С запасным путём.
+export async function grabBitmap() {
   try {
     const stream = cv().captureStream();
     const track = stream.getVideoTracks()[0];
     const bmp = await new ImageCapture(track).grabFrame();
     track.stop();
-    const c = document.createElement('canvas');
-    c.width = bmp.width; c.height = bmp.height;
-    c.getContext('2d').drawImage(bmp, 0, 0);
-    return await new Promise(r => c.toBlob(r, 'image/png'));
-  } catch (e) {                                   // запасной путь
+    return bmp;
+  } catch (e) {                                   // запасной путь через rAF
     const url = await shotViaRAF();
-    return await (await fetch(url)).blob();
+    const blob = await (await fetch(url)).blob();
+    return await createImageBitmap(blob);
   }
+}
+
+// PNG-blob кадра
+export async function shotBlob() {
+  const bmp = await grabBitmap();
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  return await new Promise(r => c.toBlob(r, 'image/png'));
 }
 // dataURL текущего кадра
 export async function screenshot() {

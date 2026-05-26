@@ -32,6 +32,7 @@ export const CSS = `
     color:#7df0b8;text-align:center;font-weight:700}
   #tarkan-bot-ui .go:hover{background:#1a5c40}
   #tarkan-bot-ui .lbl{flex:0 0 auto;color:#6f87a0;padding:0 1px}
+  #tarkan-bot-ui .ocrval{flex:1;text-align:right;color:#9bd9c4;font-weight:700}
   #tarkan-bot-ui .big{width:100%;margin-top:9px;padding:9px;font-weight:700;letter-spacing:.6px;
     background:linear-gradient(180deg,#8a2222,#681616);border-color:#c44;color:#ffe6e0}
   #tarkan-bot-ui .big:hover{background:linear-gradient(180deg,#a82a2a,#7e1e1e)}

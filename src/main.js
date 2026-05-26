@@ -6,6 +6,7 @@ import * as keyboard from './keyboard.js';
 import { typeText, chatCommand } from './chat.js';
 import { resetMzfk } from './macro.js';
 import { screenshot, showShot } from './screenshot.js';
+import { pickRegion, readNumber, teach, ocrState } from './ocr.js';
 import { buildUI } from './ui/panel.js';
 
 function start(canvas) {
@@ -15,6 +16,7 @@ function start(canvas) {
     tap: keyboard.tap, typeText, chatCommand, resetMzfk,
     ENTER: keyboard.ENTER, BACKSPACE: keyboard.BACKSPACE, ESCAPE: keyboard.ESCAPE,
     screenshot, showShot, buildUI, focusGame: keyboard.focusGame,
+    pickRegion, readNumber, teach, ocrState,
   });
   console.log('%ctarkan-bot готов', 'color:#0f0',
     '\n  панель снизу слева. либо: chatCommand("/reset") · showShot()');
