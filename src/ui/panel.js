@@ -54,10 +54,12 @@ export function buildUI() {
   const iLvl   = el('input', { class: 'sm', value: '380' });  // порог уровня
   const iMax   = el('input', { class: 'sm', value: '400' });  // лимит (выше = мусор)
   const iPoll  = el('input', { class: 'sm', value: '3' });    // опрос, сек
-  const iErr   = el('input', { class: 'sm', value: '18' });   // макс ошибка совпадения, %
-  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr].forEach(makeEditable);
+  const iErr   = el('input', { class: 'sm', value: '12' });   // макс ошибка совпадения, % (серошкала)
+  const iThr   = el('input', { class: 'sm', value: '0' });    // ручной порог бинаризации (0=авто)
+  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr].forEach(makeEditable);
   const readMax = () => +iMax.value || 400;
-  const readErr = () => (+iErr.value || 18) / 100;
+  const readErr = () => (+iErr.value || 12) / 100;
+  const readThr = () => +iThr.value || 0;
 
   // --- ряд стата: /k [значение] + [шаг] [го] --------------------------------
   const statRow = k => {
@@ -194,28 +196,39 @@ export function buildUI() {
   const dbgCanvas = el('canvas', {});
   const dbgTxt = el('div', { class: 'dbgtxt' }, '—');
 
+  // рендер: реальные полутона (серым) + что попало в "чернила" (cyan) + боксы
   const drawDebug = a => {
-    const S = 5, w = a.w, h = a.h;
-    dbgCanvas.width = w * S; dbgCanvas.height = h * S + 12;
+    const S = 5, w = a.w, h = a.h, PAD = 12;
+    const off = document.createElement('canvas'); off.width = w; off.height = h;
+    const oc = off.getContext('2d'); const id = oc.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) {
+      const o = i * 4;
+      if (a.bin[i]) { id.data[o] = 95; id.data[o + 1] = 224; id.data[o + 2] = 192; }   // ink -> cyan
+      else { const g = a.gray ? a.gray[i] : 0; id.data[o] = g; id.data[o + 1] = g; id.data[o + 2] = g; }
+      id.data[o + 3] = 255;
+    }
+    oc.putImageData(id, 0, 0);
+    dbgCanvas.width = w * S; dbgCanvas.height = h * S + PAD;
     const x = dbgCanvas.getContext('2d');
     x.fillStyle = '#0a0e13'; x.fillRect(0, 0, dbgCanvas.width, dbgCanvas.height);
-    x.fillStyle = '#cfe';
-    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (a.bin[yy * w + xx]) x.fillRect(xx * S, yy * S + 12, S, S);
+    x.imageSmoothingEnabled = false;
+    x.drawImage(off, 0, PAD, w * S, h * S);
     x.lineWidth = 1; x.font = 'bold 10px monospace'; x.textBaseline = 'bottom';
     for (const b of a.boxes) {
       const col = b.used ? '#5fe0c0' : (b.digit != null && b.err <= readErr() ? '#ffd25f' : '#e0556a');
       x.strokeStyle = col;
-      x.strokeRect(b.x0 * S + 0.5, b.y0 * S + 12.5, (b.x1 - b.x0) * S - 1, (b.y1 - b.y0) * S - 1);
+      x.strokeRect(b.x0 * S + 0.5, b.y0 * S + PAD + 0.5, (b.x1 - b.x0) * S - 1, (b.y1 - b.y0) * S - 1);
       x.fillStyle = col;
-      x.fillText(b.digit != null ? `${b.digit}·${Math.round(b.err * 100)}` : '?', b.x0 * S, b.y0 * S + 11);
+      x.fillText(b.digit != null ? `${b.digit}·${Math.round(b.err * 100)}` : '?', b.x0 * S, b.y0 * S + PAD - 1);
     }
   };
   const refreshDbg = async () => {
     if (!ocrState.region) { dbgTxt.textContent = 'нет области'; return; }
     try {
-      const a = await analyze({ maxErr: readErr(), max: readMax() });
+      const a = await analyze({ maxErr: readErr(), max: readMax(), thresh: readThr() });
       if (a.bin) drawDebug(a);
-      dbgTxt.textContent = a.ok ? `= ${a.value} (err ${Math.round(a.err * 100)}%)` : `— ${a.reason}`;
+      const thInfo = a.th != null ? ` · th ${a.th}` : '';
+      dbgTxt.textContent = (a.ok ? `= ${a.value} (err ${Math.round(a.err * 100)}%)` : `— ${a.reason}`) + thInfo;
       if (a.ok) setLevel(a.value);
       syncReg();
     } catch (e) { dbgTxt.textContent = 'ошибка чтения'; }
@@ -242,8 +255,10 @@ export function buildUI() {
     el('div', { class: 'hd' }, el('b', {}, 'OCR debug'), dbgClose),
     dbgCanvas,
     dbgTxt,
+    el('div', { class: 'row' }, el('span', { class: 'nlbl' }, 'порог'), iThr,
+      el('span', { class: 'leg', style: 'margin:0' }, '0 = авто')),
     nudRow('x'), nudRow('y'), nudRow('w'), nudRow('h'),
-    el('div', { class: 'leg' }, 'рамки: cyan = взято в число · yellow = кандидат · red = мусор. подпись = цифра·ошибка%'),
+    el('div', { class: 'leg' }, 'серое = реальные полутона · cyan = «чернила» (порог) · рамки: взято / кандидат / мусор. подпись = цифра·ошибка%'),
   );
   document.body.appendChild(dbgPanel);
   const closeDbg = () => { dbgPanel.classList.remove('open'); if (dbgIv) { clearInterval(dbgIv); dbgIv = null; } };

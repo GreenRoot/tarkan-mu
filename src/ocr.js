@@ -12,14 +12,18 @@ import { grabBitmap } from './screenshot.js';
 const LS = 'tarkanbot.ocr';
 export const ocrState = { region: null, templates: {}, GW: 12, GH: 18 };
 
+const FMT = 'gray1';   // формат эталонов; смена -> старые сбрасываются
 function load() {
   try {
     const o = JSON.parse(localStorage.getItem(LS));
-    if (o) { ocrState.region = o.region || null; ocrState.templates = o.templates || {}; }
+    if (o) {
+      ocrState.region = o.region || null;
+      ocrState.templates = o.fmt === FMT ? (o.templates || {}) : {};   // другой формат -> перекалибровка
+    }
   } catch (e) {}
 }
 function save() {
-  try { localStorage.setItem(LS, JSON.stringify({ region: ocrState.region, templates: ocrState.templates })); } catch (e) {}
+  try { localStorage.setItem(LS, JSON.stringify({ fmt: FMT, region: ocrState.region, templates: ocrState.templates })); } catch (e) {}
 }
 load();
 
@@ -73,8 +77,10 @@ async function regionImageData() {
   return ctx.getImageData(0, 0, reg.w, reg.h);
 }
 
-// бинаризация: текст = меньшинство пикселей (авто light-on-dark / dark-on-light)
-function binarize(img) {
+// бинаризация: текст = меньшинство пикселей (авто light-on-dark / dark-on-light).
+// thresh>0 -> ручной порог (для дебага); иначе авто (min+max)/2.
+// Возвращает также серую карту (gray) и применённый порог (th) для визуализации.
+function binarize(img, thresh) {
   const { width: w, height: h, data: d } = img;
   const lum = new Float32Array(w * h);
   let mn = 255, mx = 0;
@@ -82,12 +88,13 @@ function binarize(img) {
     const L = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
     lum[i] = L; if (L < mn) mn = L; if (L > mx) mx = L;
   }
-  const th = (mn + mx) / 2;
+  const th = thresh && thresh > 0 ? thresh : (mn + mx) / 2;
   let above = 0; for (let i = 0; i < w * h; i++) if (lum[i] > th) above++;
   const fgHigh = above <= w * h - above;                 // ярких меньше -> текст яркий
   const bin = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) bin[i] = ((lum[i] > th) === fgHigh) ? 1 : 0;
-  return { w, h, bin };
+  const gray = new Uint8ClampedArray(w * h);
+  for (let i = 0; i < w * h; i++) { gray[i] = lum[i]; bin[i] = ((lum[i] > th) === fgHigh) ? 1 : 0; }
+  return { w, h, bin, gray, fgHigh, th: Math.round(th) };
 }
 
 // сегментация по столбцам -> боксы цифр (обрезанные по вертикали)
@@ -107,25 +114,35 @@ function segment({ w, h, bin }) {
   }).filter(b => b.y1 > b.y0);
 }
 
-// бокс -> нормализованная сетка GW×GH
-function normBox({ w, bin }, b, GW, GH) {
+// бокс -> нормализованная серая сетка GW×GH (0-255).
+// Используем полутона (anti-alias), приводим к "чернила=ярко" по полярности,
+// и растягиваем контраст в 0-255 -> устойчиво к яркости/сглаживанию.
+function normGray({ w, gray }, b, GW, GH, fgHigh) {
   const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-  const out = new Uint8Array(GW * GH);
+  const tmp = new Float32Array(GW * GH);
+  let mn = 255, mx = 0;
   for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
     const sx = b.x0 + Math.floor(gx * bw / GW), sy = b.y0 + Math.floor(gy * bh / GH);
-    out[gy * GW + gx] = bin[sy * w + sx];
+    let v = gray[sy * w + sx];
+    if (!fgHigh) v = 255 - v;                  // полярность: чернила всегда ярко
+    tmp[gy * GW + gx] = v; if (v < mn) mn = v; if (v > mx) mx = v;
   }
+  const rng = mx - mn || 1;
+  const out = new Uint8ClampedArray(GW * GH);
+  for (let i = 0; i < tmp.length; i++) out[i] = Math.round((tmp[i] - mn) / rng * 255);
   return out;
 }
 
-function matchGrid(grid, templates, GW, GH) {
-  let best = null, bestErr = Infinity;
+// совпадение по средней абсолютной разнице яркостей -> err в [0..1]
+function matchGray(grid, templates, GW, GH) {
+  let best = null, bestErr = Infinity; const N = GW * GH;
   for (const dig in templates) {
-    const t = templates[dig]; let err = 0;
-    for (let i = 0; i < GW * GH; i++) if (grid[i] !== t[i]) err++;
+    const t = templates[dig]; let s = 0;
+    for (let i = 0; i < N; i++) s += Math.abs(grid[i] - t[i]);
+    const err = s / (N * 255);
     if (err < bestErr) { bestErr = err; best = dig; }
   }
-  return { digit: best, err: bestErr / (GW * GH) };
+  return { digit: best, err: bestErr };
 }
 
 // --- ПУБЛИЧНОЕ --------------------------------------------------------------
@@ -139,16 +156,16 @@ function dropSmall(boxes) {
 // полный разбор области (для дебага И чтения). Возвращает bin, боксы с разметкой,
 // выбранную группу, число. Логика анти-мусора: метка "Уровень:" слева; берём боксы,
 // похожие на выученную цифру (err<=maxErr), затем правейший кластер (метка отделена зазором).
-export async function analyze({ maxErr = 0.2, max = Infinity } = {}) {
+export async function analyze({ maxErr = 0.13, max = Infinity, thresh = 0 } = {}) {
   const { GW, GH, templates } = ocrState;
   if (!ocrState.region) return { ok: false, reason: 'нет области' };
-  const { w, h, bin } = binarize(await regionImageData());
+  const { w, h, bin, gray, fgHigh, th } = binarize(await regionImageData(), thresh);
   const hasTpl = Object.keys(templates).length > 0;
   const boxes = dropSmall(segment({ w, h, bin })).map(b => {
-    const m = hasTpl ? matchGrid(normBox({ w, bin }, b, GW, GH), templates, GW, GH) : { digit: null, err: 1 };
+    const m = hasTpl ? matchGray(normGray({ w, gray }, b, GW, GH, fgHigh), templates, GW, GH) : { digit: null, err: 1 };
     return { ...b, digit: m.digit, err: m.err, used: false };
   });
-  const base = { w, h, bin, boxes };
+  const base = { w, h, bin, gray, th, boxes };
   if (!hasTpl) return { ...base, ok: false, reason: 'нет калибровки' };
 
   const cand = boxes.filter(b => b.digit != null && b.err <= maxErr);
@@ -191,12 +208,12 @@ export function setRegion(p) {
 export async function teach(known) {
   known = String(known).trim();
   if (!/^\d+$/.test(known)) return { ok: false, reason: 'нужны только цифры' };
-  const bin = binarize(await regionImageData());
-  const boxes = dropSmall(segment(bin));
+  const B = binarize(await regionImageData());
+  const boxes = dropSmall(segment(B));
   if (boxes.length < known.length) return { ok: false, reason: `боксов ${boxes.length} < цифр ${known.length}` };
   const use = boxes.slice(boxes.length - known.length);   // правейшие N = цифры
   const { GW, GH } = ocrState;
-  for (let i = 0; i < use.length; i++) ocrState.templates[known[i]] = Array.from(normBox(bin, use[i], GW, GH));
+  for (let i = 0; i < use.length; i++) ocrState.templates[known[i]] = Array.from(normGray(B, use[i], GW, GH, B.fgHigh));
   save();
   return { ok: true, learned: Object.keys(ocrState.templates).sort().join('') };
 }

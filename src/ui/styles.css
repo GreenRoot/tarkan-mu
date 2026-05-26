@@ -377,6 +377,17 @@
   color: #dce8f0;
 }
 
+#tarkan-debug input {
+  width: 56px;
+  padding: 3px 5px;
+  text-align: center;
+  border: 1px solid #243240;
+  border-radius: 5px;
+  color: #dce8f0;
+  background: #070b10;
+  outline: none;
+}
+
 #tarkan-debug button {
   padding: 3px 7px;
   border: 1px solid #2c4254;
