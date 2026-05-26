@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tarkan-bot
 // @namespace    tarkan.gg
-// @version      1.4.0
+// @version      1.4.1
 // @description  MU online: авто-ресет, раздача статов, скриншот canvas
 // @author       Санёк
 // @match        *://tarkan.gg/*
@@ -372,6 +372,17 @@
     const maxH = Math.max(...boxes.map((b) => b.y1 - b.y0));
     return boxes.filter((b) => b.y1 - b.y0 >= 0.5 * maxH);
   }
+  function clusterRight(boxes) {
+    if (!boxes.length) return [];
+    const avgW = boxes.reduce((s, b) => s + (b.x1 - b.x0), 0) / boxes.length;
+    const cl = [[boxes[0]]];
+    for (let i = 1; i < boxes.length; i++) {
+      const gap = boxes[i].x0 - boxes[i - 1].x1;
+      if (gap > 1.5 * avgW) cl.push([boxes[i]]);
+      else cl[cl.length - 1].push(boxes[i]);
+    }
+    return cl[cl.length - 1];
+  }
   async function analyze({ maxErr = 0.13, max = Infinity, thresh = 0 } = {}) {
     const { GW, GH, templates } = ocrState;
     if (!ocrState.region) return { ok: false, reason: "нет области" };
@@ -385,14 +396,7 @@
     if (!hasTpl) return { ...base, ok: false, reason: "нет калибровки" };
     const cand = boxes.filter((b) => b.digit != null && b.err <= maxErr);
     if (!cand.length) return { ...base, ok: false, reason: "цифр не распознано" };
-    const avgW = cand.reduce((s, b) => s + (b.x1 - b.x0), 0) / cand.length;
-    const clusters = [[cand[0]]];
-    for (let i = 1; i < cand.length; i++) {
-      const gap = cand[i].x0 - cand[i - 1].x1;
-      if (gap > 1.5 * avgW) clusters.push([cand[i]]);
-      else clusters[clusters.length - 1].push(cand[i]);
-    }
-    const group = clusters[clusters.length - 1];
+    const group = clusterRight(cand);
     group.forEach((b) => {
       b.used = true;
     });
@@ -422,11 +426,13 @@
     known = String(known).trim();
     if (!/^\d+$/.test(known)) return { ok: false, reason: "нужны только цифры" };
     const B = binarize(await regionImageData());
-    const boxes = dropSmall(segment(B));
-    if (boxes.length < known.length) return { ok: false, reason: `боксов ${boxes.length} < цифр ${known.length}` };
-    const use = boxes.slice(boxes.length - known.length);
+    const group = clusterRight(dropSmall(segment(B)));
+    if (!group.length) return { ok: false, reason: "цифр не видно" };
+    if (group.length !== known.length) {
+      return { ok: false, reason: `в рамке ${group.length} цифр, ввёл ${known.length} — глянь дебаг` };
+    }
     const { GW, GH } = ocrState;
-    for (let i = 0; i < use.length; i++) ocrState.templates[known[i]] = Array.from(normGray(B, use[i], GW, GH, B.fgHigh));
+    for (let i = 0; i < group.length; i++) ocrState.templates[known[i]] = Array.from(normGray(B, group[i], GW, GH, B.fgHigh));
     save();
     return { ok: true, learned: Object.keys(ocrState.templates).sort().join("") };
   }
