@@ -94,7 +94,7 @@ export function buildUI() {
     const ms = runMs + (runFrom ? Date.now() - runFrom : 0);
     statsTxt.textContent = `ресетов: ${resets} · аптайм: ${fmtHMS(Math.floor(ms / 1000))}`;
   };
-  icReset.onclick = () => { resets = 0; runMs = 0; runFrom = runFrom ? Date.now() : 0; renderStats(); log('статистика сброшена'); };
+  icReset.onclick = () => { resets = 0; runMs = 0; runFrom = isRunning() ? Date.now() : 0; renderStats(); log('статистика сброшена'); };
   renderStats();
 
   const doReset = async () => {
@@ -104,21 +104,26 @@ export function buildUI() {
     renderStats();
   };
 
-  // --- авто-повтор по таймеру (растущий интервал) ---------------------------
-  let auto = null, countIv = null, nextAt = 0, curInt = 0;
+  // --- единый пульс: аптайм идёт пока активен ЛЮБОЙ авто; обновляет статы+отсчёт
+  let auto = null, ocrIv = null, ocrBusy = false, nextAt = 0, curInt = 0;
   const countEl = el('div', { class: 'count' }, '');
   const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  const tick = () => {
+  const isRunning = () => auto !== null || ocrIv !== null;
+  const heartbeat = () => {
+    const run = isRunning();
+    if (run && !runFrom) runFrom = Date.now();
+    else if (!run && runFrom) { runMs += Date.now() - runFrom; runFrom = 0; }
     renderStats();
-    if (!nextAt) { countEl.textContent = ''; return; }
-    const left = Math.max(0, Math.ceil((nextAt - Date.now()) / 1000));
-    countEl.textContent = `след. reset через ${fmt(left)}`;
+    countEl.textContent = nextAt ? `след. reset через ${fmt(Math.max(0, Math.ceil((nextAt - Date.now()) / 1000)))}` : '';
   };
+  const hbIv = setInterval(heartbeat, 500);
+
+  // --- авто-повтор по таймеру (растущий интервал) ---------------------------
   const scheduleNext = () => {
     const s = Math.max(1, Math.round(curInt));
-    nextAt = Date.now() + s * 1000; tick();
+    nextAt = Date.now() + s * 1000; heartbeat();
     auto = setTimeout(async () => {
-      nextAt = 0; tick();
+      nextAt = 0;
       log('авто RESET MZFK...');
       await doReset();
       curInt += (+iStep.value || 0);
@@ -128,12 +133,10 @@ export function buildUI() {
   const bAuto = el('button', { class: 'run' }, '▶ АВТО');
   bAuto.onclick = async () => {
     if (auto !== null) {
-      clearTimeout(auto); clearInterval(countIv); auto = null; nextAt = 0;
-      runMs += runFrom ? Date.now() - runFrom : 0; runFrom = 0; tick();
+      clearTimeout(auto); auto = null; nextAt = 0; heartbeat();
       bAuto.classList.remove('on'); bAuto.textContent = '▶ АВТО'; log('авто стоп'); return;
     }
-    auto = -1; curInt = Math.max(1, +iBase.value || AUTO_BASE); runFrom = Date.now();
-    countIv = setInterval(tick, 500);
+    auto = -1; curInt = Math.max(1, +iBase.value || AUTO_BASE); heartbeat();
     bAuto.classList.add('on'); bAuto.textContent = '⏹ СТОП'; log('авто старт: RESET MZFK сейчас');
     await doReset();
     if (auto !== null) scheduleNext();
@@ -164,17 +167,16 @@ export function buildUI() {
   const bEye = el('button', { onclick: () => { hlOn = !hlOn; bEye.textContent = hlOn ? '👁' : '🚫'; placeHighlight(); } }, '👁');
 
   // --- ресет по уровню (опрос OCR) ------------------------------------------
-  let ocrIv = null, ocrBusy = false;
   const bLvlAuto = el('button', { class: 'run' }, '▶ ресет по ур.');
   bLvlAuto.onclick = () => {
     if (ocrIv) {
-      clearInterval(ocrIv); ocrIv = null;
+      clearInterval(ocrIv); ocrIv = null; heartbeat();
       bLvlAuto.classList.remove('on'); bLvlAuto.textContent = '▶ ресет по ур.'; log('ур-авто стоп'); return;
     }
     if (!ocrState.region) { log('сначала задай область (вкладка OCR)'); return; }
     if (!Object.keys(ocrState.templates).length) { log('сначала откалибруй (вкладка OCR → учить)'); return; }
     const s = Math.max(1, +iPoll.value || 3);
-    bLvlAuto.classList.add('on'); bLvlAuto.textContent = '⏹ стоп ур.'; log('ур-авто старт');
+    bLvlAuto.classList.add('on'); bLvlAuto.textContent = '⏹ стоп ур.'; log('ур-авто старт'); heartbeat();
     ocrIv = setInterval(async () => {
       if (ocrBusy) return; ocrBusy = true;
       try {
@@ -342,12 +344,30 @@ export function buildUI() {
   addEventListener('mousemove', onMove);
   addEventListener('mouseup', onUp);
 
+  // --- сохранение всех настроек в localStorage (переживают перезагрузку) -----
+  const CFG = 'tarkanbot.cfg';
+  const cfgMap = () => ({
+    cmd: iCmd, after: iAfter, gap: iGap, base: iBase, step: iStep,
+    lvl: iLvl, max: iMax, poll: iPoll, err: iErr, thr: iThr,
+    ...Object.fromEntries(STAT_KEYS.map(k => ['s_' + k, statInputs[k]])),
+    ...Object.fromEntries(STAT_KEYS.map(k => ['i_' + k, incInputs[k]])),
+  });
+  const saveCfg = () => {
+    try { const m = cfgMap(), o = {}; for (const k in m) if (m[k]) o[k] = m[k].value; localStorage.setItem(CFG, JSON.stringify(o)); } catch (e) {}
+  };
+  const loadCfg = () => {
+    try { const o = JSON.parse(localStorage.getItem(CFG)); if (!o) return; const m = cfgMap(); for (const k in o) if (m[k]) m[k].value = o[k]; } catch (e) {}
+  };
+  loadCfg();
+  let saveT; const saveDeb = () => { clearTimeout(saveT); saveT = setTimeout(saveCfg, 400); };
+  Object.values(cfgMap()).forEach(inp => inp && inp.addEventListener('keyup', saveDeb));
+
   syncReg();          // показать рамку + значения, если область сохранена
 
   // стоп прошлого инстанса при перевставке (без кнопки закрытия)
   window.__tarkanStop = () => {
     if (auto !== null) clearTimeout(auto);
-    clearInterval(countIv); if (ocrIv) clearInterval(ocrIv); if (dbgIv) clearInterval(dbgIv);
+    clearInterval(hbIv); if (ocrIv) clearInterval(ocrIv); if (dbgIv) clearInterval(dbgIv);
     removeEventListener('keydown', probe, true);
     removeEventListener('keypress', probe, true);
     removeEventListener('resize', placeHighlight);

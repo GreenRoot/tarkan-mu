@@ -1,4 +1,4 @@
-// tarkan-bot v1.4.1 — собрано из src/. Вставить целиком в консоль DevTools (F12).
+// tarkan-bot v1.5.0 — собрано из src/. Вставить целиком в консоль DevTools (F12).
 (() => {
   // src/keyboard.js
   var TARGET = typeof document !== "undefined" && document.getElementById("canvas") || (typeof window !== "undefined" ? window : null);
@@ -580,7 +580,7 @@
     icReset.onclick = () => {
       resets = 0;
       runMs = 0;
-      runFrom = runFrom ? Date.now() : 0;
+      runFrom = isRunning() ? Date.now() : 0;
       renderStats();
       log("статистика сброшена");
     };
@@ -593,25 +593,27 @@
       });
       renderStats();
     };
-    let auto = null, countIv = null, nextAt = 0, curInt = 0;
+    let auto = null, ocrIv = null, ocrBusy = false, nextAt = 0, curInt = 0;
     const countEl = el("div", { class: "count" }, "");
     const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-    const tick = () => {
-      renderStats();
-      if (!nextAt) {
-        countEl.textContent = "";
-        return;
+    const isRunning = () => auto !== null || ocrIv !== null;
+    const heartbeat = () => {
+      const run = isRunning();
+      if (run && !runFrom) runFrom = Date.now();
+      else if (!run && runFrom) {
+        runMs += Date.now() - runFrom;
+        runFrom = 0;
       }
-      const left = Math.max(0, Math.ceil((nextAt - Date.now()) / 1e3));
-      countEl.textContent = `след. reset через ${fmt(left)}`;
+      renderStats();
+      countEl.textContent = nextAt ? `след. reset через ${fmt(Math.max(0, Math.ceil((nextAt - Date.now()) / 1e3)))}` : "";
     };
+    const hbIv = setInterval(heartbeat, 500);
     const scheduleNext = () => {
       const s = Math.max(1, Math.round(curInt));
       nextAt = Date.now() + s * 1e3;
-      tick();
+      heartbeat();
       auto = setTimeout(async () => {
         nextAt = 0;
-        tick();
         log("авто RESET MZFK...");
         await doReset();
         curInt += +iStep.value || 0;
@@ -622,12 +624,9 @@
     bAuto.onclick = async () => {
       if (auto !== null) {
         clearTimeout(auto);
-        clearInterval(countIv);
         auto = null;
         nextAt = 0;
-        runMs += runFrom ? Date.now() - runFrom : 0;
-        runFrom = 0;
-        tick();
+        heartbeat();
         bAuto.classList.remove("on");
         bAuto.textContent = "▶ АВТО";
         log("авто стоп");
@@ -635,8 +634,7 @@
       }
       auto = -1;
       curInt = Math.max(1, +iBase.value || AUTO_BASE);
-      runFrom = Date.now();
-      countIv = setInterval(tick, 500);
+      heartbeat();
       bAuto.classList.add("on");
       bAuto.textContent = "⏹ СТОП";
       log("авто старт: RESET MZFK сейчас");
@@ -675,12 +673,12 @@
       bEye.textContent = hlOn ? "👁" : "🚫";
       placeHighlight();
     } }, "👁");
-    let ocrIv = null, ocrBusy = false;
     const bLvlAuto = el("button", { class: "run" }, "▶ ресет по ур.");
     bLvlAuto.onclick = () => {
       if (ocrIv) {
         clearInterval(ocrIv);
         ocrIv = null;
+        heartbeat();
         bLvlAuto.classList.remove("on");
         bLvlAuto.textContent = "▶ ресет по ур.";
         log("ур-авто стоп");
@@ -698,6 +696,7 @@
       bLvlAuto.classList.add("on");
       bLvlAuto.textContent = "⏹ стоп ур.";
       log("ур-авто старт");
+      heartbeat();
       ocrIv = setInterval(async () => {
         if (ocrBusy) return;
         ocrBusy = true;
@@ -929,10 +928,49 @@
     const onUp = () => drag = null;
     addEventListener("mousemove", onMove);
     addEventListener("mouseup", onUp);
+    const CFG = "tarkanbot.cfg";
+    const cfgMap = () => ({
+      cmd: iCmd,
+      after: iAfter,
+      gap: iGap,
+      base: iBase,
+      step: iStep,
+      lvl: iLvl,
+      max: iMax,
+      poll: iPoll,
+      err: iErr,
+      thr: iThr,
+      ...Object.fromEntries(STAT_KEYS.map((k) => ["s_" + k, statInputs[k]])),
+      ...Object.fromEntries(STAT_KEYS.map((k) => ["i_" + k, incInputs[k]]))
+    });
+    const saveCfg = () => {
+      try {
+        const m = cfgMap(), o = {};
+        for (const k in m) if (m[k]) o[k] = m[k].value;
+        localStorage.setItem(CFG, JSON.stringify(o));
+      } catch (e) {
+      }
+    };
+    const loadCfg = () => {
+      try {
+        const o = JSON.parse(localStorage.getItem(CFG));
+        if (!o) return;
+        const m = cfgMap();
+        for (const k in o) if (m[k]) m[k].value = o[k];
+      } catch (e) {
+      }
+    };
+    loadCfg();
+    let saveT;
+    const saveDeb = () => {
+      clearTimeout(saveT);
+      saveT = setTimeout(saveCfg, 400);
+    };
+    Object.values(cfgMap()).forEach((inp) => inp && inp.addEventListener("keyup", saveDeb));
     syncReg();
     window.__tarkanStop = () => {
       if (auto !== null) clearTimeout(auto);
-      clearInterval(countIv);
+      clearInterval(hbIv);
       if (ocrIv) clearInterval(ocrIv);
       if (dbgIv) clearInterval(dbgIv);
       removeEventListener("keydown", probe, true);
