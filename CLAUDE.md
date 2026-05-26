@@ -26,7 +26,7 @@ src/
   macro.js      resetMzfk (/reset -> пауза -> раздача статов)
   screenshot.js скриншот canvas
   ui/dom.js     el(), makeEditable()
-  ui/styles.js  CSS
+  ui/styles.css CSS (импортится как текст через esbuild loader)
   ui/panel.js   buildUI() — вся панель
   main.js       вход: ждёт canvas -> панель -> экспорт в window
 legacy/         старый монолит (до декомпозиции)

@@ -1,0 +1,257 @@
+/* Панель tarkan-bot. Подключается в JS как текст (esbuild loader .css = text). */
+
+#tarkan-bot-ui {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2147483647;
+  width: 250px;
+  overflow: hidden;
+  border: 1px solid #243240;
+  border-radius: 11px;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #dce8f0;
+  background: linear-gradient(180deg, rgba(16, 22, 30, .97), rgba(9, 13, 18, .98));
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .6);
+  backdrop-filter: blur(4px);
+  user-select: none;
+}
+
+#tarkan-bot-ui * {
+  box-sizing: border-box;
+  font: inherit;
+}
+
+/* шапка */
+#tarkan-bot-ui .hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: move;
+  border-bottom: 1px solid #243240;
+  background: linear-gradient(180deg, #172533, #0d1620);
+}
+
+#tarkan-bot-ui .ttl {
+  flex: 1;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: #5fe0c0;
+}
+
+#tarkan-bot-ui .ic {
+  padding: 0 4px;
+  font-size: 12px;
+  color: #8aa1b0;
+  cursor: pointer;
+}
+
+#tarkan-bot-ui .ic:hover {
+  color: #fff;
+}
+
+/* тело + сворачивание */
+#tarkan-bot-ui .body {
+  padding: 8px 10px 10px;
+}
+
+#tarkan-bot-ui.min .body {
+  display: none;
+}
+
+/* заголовки секций */
+#tarkan-bot-ui .sec {
+  margin: 10px 0 3px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #577086;
+}
+
+#tarkan-bot-ui .sec:first-child {
+  margin-top: 0;
+}
+
+/* строки */
+#tarkan-bot-ui .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 0;
+}
+
+/* поля ввода */
+#tarkan-bot-ui input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid #243240;
+  border-radius: 5px;
+  color: #dce8f0;
+  background: #070b10;
+  outline: none;
+}
+
+#tarkan-bot-ui input:focus {
+  border-color: #3f6f8f;
+}
+
+#tarkan-bot-ui input.sm {
+  flex: 0 0 52px;
+  text-align: center;
+}
+
+/* кнопки */
+#tarkan-bot-ui button {
+  padding: 4px 8px;
+  border: 1px solid #2c4254;
+  border-radius: 5px;
+  color: #dce8f0;
+  background: #16222e;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: .1s;
+}
+
+#tarkan-bot-ui button:hover {
+  border-color: #3a5a72;
+  background: #1f3242;
+}
+
+#tarkan-bot-ui button:active {
+  transform: translateY(1px);
+}
+
+/* подписи и теги */
+#tarkan-bot-ui .tag {
+  flex: 0 0 24px;
+  text-align: center;
+  font-weight: 700;
+  color: #7fd9c0;
+}
+
+#tarkan-bot-ui .lbl {
+  flex: 0 0 auto;
+  padding: 0 1px;
+  color: #6f87a0;
+}
+
+#tarkan-bot-ui .ocrval {
+  flex: 1;
+  text-align: right;
+  font-weight: 700;
+  color: #9bd9c4;
+}
+
+/* кнопка "го" у статов */
+#tarkan-bot-ui .go {
+  flex: 0 0 40px;
+  text-align: center;
+  font-weight: 700;
+  border-color: #1c6b48;
+  color: #7df0b8;
+  background: #123e2c;
+}
+
+#tarkan-bot-ui .go:hover {
+  background: #1a5c40;
+}
+
+/* большая красная кнопка RESET MZFK */
+#tarkan-bot-ui .big {
+  width: 100%;
+  margin-top: 9px;
+  padding: 9px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  border-color: #c44;
+  color: #ffe6e0;
+  background: linear-gradient(180deg, #8a2222, #681616);
+}
+
+#tarkan-bot-ui .big:hover {
+  background: linear-gradient(180deg, #a82a2a, #7e1e1e);
+}
+
+/* зелёная кнопка авто-запуска (.on = активна, красная) */
+#tarkan-bot-ui .run {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  border-color: #1c8b5a;
+  color: #cffce4;
+  background: linear-gradient(180deg, #15633f, #0d4a2e);
+}
+
+#tarkan-bot-ui .run:hover {
+  background: linear-gradient(180deg, #1a7a4d, #115a39);
+}
+
+#tarkan-bot-ui .run.on {
+  border-color: #d55;
+  color: #ffe6e0;
+  background: linear-gradient(180deg, #8a2222, #681616);
+}
+
+/* обратный отсчёт до след. ресета */
+#tarkan-bot-ui .count {
+  margin-top: 7px;
+  min-height: 14px;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: #9bd9c4;
+}
+
+/* статистика + крестик сброса */
+#tarkan-bot-ui .stats {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  font-size: 10px;
+  color: #7088a0;
+}
+
+#tarkan-bot-ui .rst {
+  padding: 0 4px;
+  line-height: 14px;
+  font-size: 9px;
+  border: 1px solid #2a3a4a;
+  border-radius: 3px;
+  color: #5a6f82;
+  cursor: pointer;
+}
+
+#tarkan-bot-ui .rst:hover {
+  border-color: #a44;
+  color: #ff9a9a;
+}
+
+/* лог */
+#tarkan-bot-ui .log {
+  margin-top: 9px;
+  padding: 6px 8px;
+  min-height: 15px;
+  font-size: 10px;
+  word-break: break-all;
+  border: 1px solid #1a2530;
+  border-radius: 5px;
+  color: #7fb89f;
+  background: #070b10;
+}
+
+/* рамка читаемой OCR-области (отдельный элемент поверх canvas) */
+#tarkan-ocr-box {
+  position: fixed;
+  z-index: 2147483646;
+  display: none;
+  pointer-events: none;
+  border: 1px solid #5fe0c0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 6px rgba(95, 224, 192, .5);
+}

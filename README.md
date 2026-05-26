@@ -16,7 +16,7 @@ src/
   screenshot.js   скриншот canvas (captureStream + запасной rAF)
   ui/
     dom.js        el(), makeEditable() (ручной ввод в поля поверх SDL)
-    styles.js     CSS панели
+    styles.css    CSS панели (импортится как текст)
     panel.js      buildUI() — вся панель
   main.js         точка входа: ждёт canvas, строит панель, экспорт в window
 build.mjs         сборка esbuild → dist/

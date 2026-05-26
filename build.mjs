@@ -6,7 +6,7 @@
 // ============================================================================
 import * as esbuild from 'esbuild';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 
 const consoleBanner = `// tarkan-bot v${VERSION} — собрано из src/. Вставить целиком в консоль DevTools (F12).`;
 
@@ -31,6 +31,7 @@ const common = {
   target: 'es2020',
   charset: 'utf8',
   legalComments: 'none',
+  loader: { '.css': 'text' },   // import CSS from './styles.css' -> строка
 };
 
 const targets = [

@@ -2,7 +2,7 @@
 //  Панель управления — фикс снизу слева, поверх всего.
 // ============================================================================
 import { el, makeEditable } from './dom.js';
-import { CSS } from './styles.js';
+import CSS from './styles.css';
 import { STAT_KEYS, STAT_DEFAULTS, INC_DEFAULTS, TIMING, AUTO_BASE, AUTO_STEP } from '../config.js';
 import { statInputs, incInputs, timingInputs, statVal, incVal } from '../state.js';
 import { focusGame, ENTER, ESCAPE } from '../keyboard.js';
