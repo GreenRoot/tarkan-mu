@@ -1,5 +1,5 @@
 // ============================================================================
-//  Панель управления — фикс снизу слева, поверх всего.
+//  Панель управления (табы) + выезжающая слева дебаг-панель OCR.
 // ============================================================================
 import { el, makeEditable } from './dom.js';
 import CSS from './styles.css';
@@ -9,22 +9,25 @@ import { focusGame, ENTER, ESCAPE } from '../keyboard.js';
 import { chatCommand } from '../chat.js';
 import { resetMzfk } from '../macro.js';
 import { showShot } from '../screenshot.js';
-import { ocrState, pickRegion, readNumber, teach } from '../ocr.js';
+import { ocrState, pickRegion, readNumber, teach, analyze, setRegion } from '../ocr.js';
 
 export function buildUI() {
-  if (window.__tarkanStop) { try { window.__tarkanStop(); } catch (e) {} }  // глушим прошлый инстанс (таймеры/слушатели)
-  document.getElementById('tarkan-bot-ui')?.remove();        // не плодим копии
+  if (window.__tarkanStop) { try { window.__tarkanStop(); } catch (e) {} }  // глушим прошлый инстанс
+  document.getElementById('tarkan-bot-ui')?.remove();
   document.getElementById('tarkan-ocr-box')?.remove();
+  document.getElementById('tarkan-debug')?.remove();
   document.head.appendChild(el('style', {}, CSS));
 
   const logEl = el('div', { class: 'log' }, 'готов · жми кнопку');
   const log = m => { logEl.textContent = m; };
+  const sec = t => el('div', { class: 'sec' }, t);
+  const lbl = t => el('span', { class: 'lbl' }, t);
 
-  // заголовок (показывает уровень — виден даже в свёрнутом виде)
+  // заголовок — показывает уровень (виден и в свёрнутом виде)
   const ttlEl = el('span', { class: 'ttl' }, '⚡ tarkan-bot');
   const setLevel = v => { ttlEl.textContent = v == null ? '⚡ tarkan-bot' : `⚡ tarkan-bot · ур ${v}`; };
 
-  // тонкая рамка поверх области, которую читает OCR
+  // тонкая рамка поверх читаемой области
   const hlBox = el('div', { id: 'tarkan-ocr-box', class: 'ocrbox' });
   document.body.appendChild(hlBox);
   let hlOn = true;
@@ -46,11 +49,17 @@ export function buildUI() {
   const iCmd   = el('input', { value: '/reset' });
   const iAfter = el('input', { class: 'sm', value: String(TIMING.afterReset) }); timingInputs.afterReset = iAfter;
   const iGap   = el('input', { class: 'sm', value: String(TIMING.gap) });        timingInputs.gap = iGap;
-  const iBase  = el('input', { class: 'sm', value: String(AUTO_BASE) });  // базовый интервал авто, сек
-  const iStep  = el('input', { class: 'sm', value: String(AUTO_STEP) });  // прибавка к интервалу за ресет, сек
-  [iCmd, iAfter, iGap, iBase, iStep].forEach(makeEditable);
+  const iBase  = el('input', { class: 'sm', value: String(AUTO_BASE) });
+  const iStep  = el('input', { class: 'sm', value: String(AUTO_STEP) });
+  const iLvl   = el('input', { class: 'sm', value: '380' });  // порог уровня
+  const iMax   = el('input', { class: 'sm', value: '400' });  // лимит (выше = мусор)
+  const iPoll  = el('input', { class: 'sm', value: '3' });    // опрос, сек
+  const iErr   = el('input', { class: 'sm', value: '18' });   // макс ошибка совпадения, %
+  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr].forEach(makeEditable);
+  const readMax = () => +iMax.value || 400;
+  const readErr = () => (+iErr.value || 18) / 100;
 
-  // --- ряд стата: /k [значение] + [шаг] [го]  (0 значение -> пропуск) --------
+  // --- ряд стата: /k [значение] + [шаг] [го] --------------------------------
   const statRow = k => {
     const inp = el('input', { value: String(STAT_DEFAULTS[k]) });
     const inc = el('input', { class: 'sm', value: String(INC_DEFAULTS[k]) });
@@ -61,7 +70,7 @@ export function buildUI() {
       focusGame(); chatCommand(`/${k} ${v}`); log(`/${k} ${v}`);
     } }, 'го');
     return el('div', { class: 'row' }, el('span', { class: 'tag' }, '/' + k), inp,
-      el('span', { class: 'lbl' }, '+'), inc, go);
+      lbl('+'), inc, go);
   };
 
   // --- кнопки чата/клавиш ----------------------------------------------------
@@ -73,8 +82,8 @@ export function buildUI() {
   const bMacro = el('button', { class: 'big', onclick: () => {
     log('RESET MZFK...'); doReset().then(() => log('RESET MZFK ✓')); } }, '⚡ RESET MZFK');
 
-  // --- статистика: счётчик ресетов + аптайм ----------------------------------
-  let resets = 0, runMs = 0, runFrom = 0;       // runFrom!=0 -> идёт отсчёт аптайма
+  // --- статистика ------------------------------------------------------------
+  let resets = 0, runMs = 0, runFrom = 0;
   const statsTxt = el('span', {}, '');
   const icReset  = el('span', { class: 'rst', title: 'сброс статистики' }, '✕');
   const statsEl  = el('div', { class: 'stats' }, statsTxt, icReset);
@@ -83,13 +92,9 @@ export function buildUI() {
     const ms = runMs + (runFrom ? Date.now() - runFrom : 0);
     statsTxt.textContent = `ресетов: ${resets} · аптайм: ${fmtHMS(Math.floor(ms / 1000))}`;
   };
-  icReset.onclick = () => {
-    resets = 0; runMs = 0; runFrom = runFrom ? Date.now() : 0;  // обнулить, не ломая текущий отсчёт
-    renderStats(); log('статистика сброшена');
-  };
+  icReset.onclick = () => { resets = 0; runMs = 0; runFrom = runFrom ? Date.now() : 0; renderStats(); log('статистика сброшена'); };
   renderStats();
 
-  // один ресет: макрос -> счётчик++ -> прибавка к статам -> перерисовка
   const doReset = async () => {
     await resetMzfk();
     resets++;
@@ -97,11 +102,8 @@ export function buildUI() {
     renderStats();
   };
 
-  // --- авто-повтор: сразу + интервал, растущий на "прибавку" каждый ресет ----
-  let auto = null;          // null=стоп, иначе активен (-1 или handle)
-  let countIv = null;       // интервал обновления отсчёта/аптайма
-  let nextAt = 0;           // timestamp следующего ресета
-  let curInt = 0;           // текущий интервал, сек
+  // --- авто-повтор по таймеру (растущий интервал) ---------------------------
+  let auto = null, countIv = null, nextAt = 0, curInt = 0;
   const countEl = el('div', { class: 'count' }, '');
   const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const tick = () => {
@@ -117,51 +119,39 @@ export function buildUI() {
       nextAt = 0; tick();
       log('авто RESET MZFK...');
       await doReset();
-      curInt += (+iStep.value || 0);            // следующий интервал больше
+      curInt += (+iStep.value || 0);
       if (auto !== null) scheduleNext();
     }, s * 1000);
   };
   const bAuto = el('button', { class: 'run' }, '▶ АВТО');
   bAuto.onclick = async () => {
-    if (auto !== null) {                        // стоп
+    if (auto !== null) {
       clearTimeout(auto); clearInterval(countIv); auto = null; nextAt = 0;
-      runMs += runFrom ? Date.now() - runFrom : 0; runFrom = 0;   // зафиксировать аптайм
-      tick();
-      bAuto.classList.remove('on'); bAuto.textContent = '▶ АВТО';
-      log('авто стоп'); return;
+      runMs += runFrom ? Date.now() - runFrom : 0; runFrom = 0; tick();
+      bAuto.classList.remove('on'); bAuto.textContent = '▶ АВТО'; log('авто стоп'); return;
     }
-    auto = -1;                                  // маркер "активно" до первого таймаута
-    curInt = Math.max(1, +iBase.value || AUTO_BASE);  // старт с базы
-    runFrom = Date.now();
+    auto = -1; curInt = Math.max(1, +iBase.value || AUTO_BASE); runFrom = Date.now();
     countIv = setInterval(tick, 500);
-    bAuto.classList.add('on'); bAuto.textContent = '⏹ СТОП';
-    log('авто старт: RESET MZFK сейчас');
+    bAuto.classList.add('on'); bAuto.textContent = '⏹ СТОП'; log('авто старт: RESET MZFK сейчас');
     await doReset();
     if (auto !== null) scheduleNext();
   };
 
-  // --- OCR: чтение числа из области + ресет по уровню ------------------------
-  const iLvl  = el('input', { class: 'sm', value: '380' });  // порог уровня
-  const iMax  = el('input', { class: 'sm', value: '400' });  // лимит: больше = мусорное чтение
-  const iPoll = el('input', { class: 'sm', value: '3' });    // опрос, сек
-  const iErr  = el('input', { class: 'sm', value: '18' });   // макс ошибка совпадения, %
-  [iLvl, iMax, iPoll, iErr].forEach(makeEditable);
+  // --- OCR: чтение/калибровка ------------------------------------------------
   const ocrVal = el('span', { class: 'ocrval' }, ocrState.region ? '—' : 'нет обл.');
-  const readMax = () => +iMax.value || 400;
-  const readErr = () => (+iErr.value || 18) / 100;
-
   const bRegion = el('button', { onclick: async () => {
     log('тяни рамку по числу (Esc — отмена)');
     const r = await pickRegion();
     log(r ? `область ${r.w}×${r.h}` : 'отмена');
     ocrVal.textContent = r ? '—' : 'нет обл.';
-    placeHighlight();
+    syncReg();
   } }, 'обл.');
   const bTeach = el('button', { onclick: async () => {
-    const known = prompt('Какое число сейчас в рамке? (обучение цифр)'); // фокус панели ок: в игру не печатаем
+    const known = prompt('Какое число сейчас в рамке? (обучение цифр)');
     if (!known) return;
     const res = await teach(known);
     log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
+    if (dbgIv) refreshDbg();
   } }, 'учить');
   const bTest = el('button', { onclick: async () => {
     const r = await readNumber({ maxErr: readErr(), max: readMax() });
@@ -169,10 +159,9 @@ export function buildUI() {
     if (r.ok) { ocrVal.textContent = String(r.value); setLevel(r.value); log(`прочитано: ${r.value} (err ${Math.round(r.err * 100)}%)`); }
     else { ocrVal.textContent = r.suspect ? `?${r.value}` : '—'; log(`OCR: ${r.reason}`); }
   } }, 'тест');
-  // глаз — показать/скрыть рамку области
   const bEye = el('button', { onclick: () => { hlOn = !hlOn; bEye.textContent = hlOn ? '👁' : '🚫'; placeHighlight(); } }, '👁');
 
-  // авто: опрашиваем уровень; окно закрыто/мусор — пишем; если >= порога — RESET
+  // --- ресет по уровню (опрос OCR) ------------------------------------------
   let ocrIv = null, ocrBusy = false;
   const bLvlAuto = el('button', { class: 'run' }, '▶ ресет по ур.');
   bLvlAuto.onclick = () => {
@@ -180,66 +169,150 @@ export function buildUI() {
       clearInterval(ocrIv); ocrIv = null;
       bLvlAuto.classList.remove('on'); bLvlAuto.textContent = '▶ ресет по ур.'; log('ур-авто стоп'); return;
     }
-    if (!ocrState.region) { log('сначала задай область (обл.)'); return; }
-    if (!Object.keys(ocrState.templates).length) { log('сначала откалибруй (учить)'); return; }
-    const sec = Math.max(1, +iPoll.value || 3);
+    if (!ocrState.region) { log('сначала задай область (вкладка OCR)'); return; }
+    if (!Object.keys(ocrState.templates).length) { log('сначала откалибруй (вкладка OCR → учить)'); return; }
+    const s = Math.max(1, +iPoll.value || 3);
     bLvlAuto.classList.add('on'); bLvlAuto.textContent = '⏹ стоп ур.'; log('ур-авто старт');
     ocrIv = setInterval(async () => {
       if (ocrBusy) return; ocrBusy = true;
       try {
         const r = await readNumber({ maxErr: readErr(), max: readMax() });
         placeHighlight();
-        if (!r.ok) {                                   // окно закрыто / мусор / вне лимита -> НЕ ресетим
-          ocrVal.textContent = r.suspect ? `?${r.value}` : 'закрыто?';
-          log(`ур не читается: ${r.reason}`); return;
-        }
+        if (!r.ok) { ocrVal.textContent = r.suspect ? `?${r.value}` : 'закрыто?'; log(`ур не читается: ${r.reason}`); return; }
         ocrVal.textContent = String(r.value); setLevel(r.value);
         const th = +iLvl.value || 380;
         if (r.value >= th) { log(`ур ${r.value} ≥ ${th} → RESET MZFK`); await doReset(); }
       } catch (e) { log('OCR ошибка'); }
       finally { ocrBusy = false; }
-    }, sec * 1000);
+    }, s * 1000);
   };
 
-  // --- шапка: title (с уровнем) + свернуть -----------------------------------
-  const icMin = el('span', { class: 'ic', title: 'свернуть' }, '▾');
-  const hd = el('div', { class: 'hd' }, ttlEl, icMin);
+  // ==========================================================================
+  //  ДЕБАГ-ПАНЕЛЬ (слева): что видит алгоритм + попиксельный сдвиг рамки
+  // ==========================================================================
+  let dbgIv = null;
+  const dbgCanvas = el('canvas', {});
+  const dbgTxt = el('div', { class: 'dbgtxt' }, '—');
 
-  const sec = t => el('div', { class: 'sec' }, t);
-  const lbl = t => el('span', { class: 'lbl' }, t);
-  const body = el('div', { class: 'body' },
+  const drawDebug = a => {
+    const S = 5, w = a.w, h = a.h;
+    dbgCanvas.width = w * S; dbgCanvas.height = h * S + 12;
+    const x = dbgCanvas.getContext('2d');
+    x.fillStyle = '#0a0e13'; x.fillRect(0, 0, dbgCanvas.width, dbgCanvas.height);
+    x.fillStyle = '#cfe';
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (a.bin[yy * w + xx]) x.fillRect(xx * S, yy * S + 12, S, S);
+    x.lineWidth = 1; x.font = 'bold 10px monospace'; x.textBaseline = 'bottom';
+    for (const b of a.boxes) {
+      const col = b.used ? '#5fe0c0' : (b.digit != null && b.err <= readErr() ? '#ffd25f' : '#e0556a');
+      x.strokeStyle = col;
+      x.strokeRect(b.x0 * S + 0.5, b.y0 * S + 12.5, (b.x1 - b.x0) * S - 1, (b.y1 - b.y0) * S - 1);
+      x.fillStyle = col;
+      x.fillText(b.digit != null ? `${b.digit}·${Math.round(b.err * 100)}` : '?', b.x0 * S, b.y0 * S + 11);
+    }
+  };
+  const refreshDbg = async () => {
+    if (!ocrState.region) { dbgTxt.textContent = 'нет области'; return; }
+    try {
+      const a = await analyze({ maxErr: readErr(), max: readMax() });
+      if (a.bin) drawDebug(a);
+      dbgTxt.textContent = a.ok ? `= ${a.value} (err ${Math.round(a.err * 100)}%)` : `— ${a.reason}`;
+      if (a.ok) setLevel(a.value);
+      syncReg();
+    } catch (e) { dbgTxt.textContent = 'ошибка чтения'; }
+  };
+
+  // попиксельный сдвиг рамки
+  const regSpan = {};
+  const syncReg = () => {
+    const r = ocrState.region;
+    ['x', 'y', 'w', 'h'].forEach(a => { if (regSpan[a]) regSpan[a].textContent = r ? r[a] : '—'; });
+    placeHighlight();
+  };
+  const nudRow = axis => {
+    const val = el('span', { class: 'nval' }, '—'); regSpan[axis] = val;
+    const mk = d => el('button', { onclick: () => {
+      const r = ocrState.region || { x: 0, y: 0, w: 40, h: 18 };
+      setRegion({ [axis]: (r[axis] || 0) + d }); syncReg(); refreshDbg();
+    } }, (d > 0 ? '+' : '') + d);
+    return el('div', { class: 'row' }, el('span', { class: 'nlbl' }, axis), mk(-10), mk(-1), val, mk(1), mk(10));
+  };
+
+  const dbgClose = el('span', { class: 'ic' }, '✕');
+  const dbgPanel = el('div', { id: 'tarkan-debug' },
+    el('div', { class: 'hd' }, el('b', {}, 'OCR debug'), dbgClose),
+    dbgCanvas,
+    dbgTxt,
+    nudRow('x'), nudRow('y'), nudRow('w'), nudRow('h'),
+    el('div', { class: 'leg' }, 'рамки: cyan = взято в число · yellow = кандидат · red = мусор. подпись = цифра·ошибка%'),
+  );
+  document.body.appendChild(dbgPanel);
+  const closeDbg = () => { dbgPanel.classList.remove('open'); if (dbgIv) { clearInterval(dbgIv); dbgIv = null; } };
+  dbgClose.onclick = closeDbg;
+  const bDbg = el('button', { onclick: () => {
+    if (dbgPanel.classList.contains('open')) { closeDbg(); return; }
+    dbgPanel.classList.add('open'); syncReg(); refreshDbg(); dbgIv = setInterval(refreshDbg, 800);
+  } }, '🔧 дебаг');
+
+  // ==========================================================================
+  //  ТАБЫ
+  // ==========================================================================
+  const paneInput = el('div', { class: 'pane active' },
     el('div', { class: 'row' }, bOpen, bSend2, bEsc, bShot),
     el('div', { class: 'row' }, iCmd, bSend),
     sec('статы · 0 = пропуск'),
     statRow('a'), statRow('e'), statRow('f'), statRow('v'),
     bMacro,
+  );
+  const paneTimer = el('div', { class: 'pane' },
     sec('паузы, мс'),
     el('div', { class: 'row' }, lbl('после reset'), iAfter, lbl('между'), iGap),
     sec('авто, сек'),
     el('div', { class: 'row' }, lbl('база'), iBase, lbl('+ за ресет'), iStep),
     countEl,
     bAuto,
-    sec('чтение экрана (OCR)'),
-    el('div', { class: 'row' }, bRegion, bTeach, bTest, bEye, lbl('='), ocrVal),
-    el('div', { class: 'row' }, lbl('ур ≥'), iLvl, lbl('≤'), iMax, lbl('опрос'), iPoll, lbl('с')),
-    el('div', { class: 'row' }, lbl('ошибка ≤'), iErr, lbl('%')),
-    bLvlAuto,
-    statsEl,
-    logEl,
   );
+  const paneLevel = el('div', { class: 'pane' },
+    sec('ресет по уровню (OCR)'),
+    el('div', { class: 'row' }, lbl('ур ≥'), iLvl, lbl('≤'), iMax),
+    el('div', { class: 'row' }, lbl('опрос'), iPoll, lbl('с'), lbl('ошибка ≤'), iErr, lbl('%')),
+    bLvlAuto,
+  );
+  const paneOcr = el('div', { class: 'pane' },
+    sec('область / калибровка'),
+    el('div', { class: 'row' }, bRegion, bEye, bDbg),
+    el('div', { class: 'row' }, bTeach, bTest, lbl('='), ocrVal),
+  );
+
+  const panes = [];
+  const mkTab = (name, pane) => {
+    const t = el('div', { class: 'tab' }, name);
+    t.onclick = () => {
+      panes.forEach(([tb, pn]) => { tb.classList.remove('active'); pn.classList.remove('active'); });
+      t.classList.add('active'); pane.classList.add('active');
+    };
+    panes.push([t, pane]);
+    return t;
+  };
+  const tabbar = el('div', { class: 'tabbar' },
+    mkTab('ввод', paneInput), mkTab('таймер', paneTimer), mkTab('уровень', paneLevel), mkTab('OCR', paneOcr));
+  panes[0][0].classList.add('active');
+
+  // --- сборка ----------------------------------------------------------------
+  const icMin = el('span', { class: 'ic', title: 'свернуть' }, '▾');
+  const hd = el('div', { class: 'hd' }, ttlEl, icMin);
+  const body = el('div', { class: 'body' }, tabbar, paneInput, paneTimer, paneLevel, paneOcr, statsEl, logEl);
   const ui = el('div', { id: 'tarkan-bot-ui' }, hd, body);
   document.body.appendChild(ui);
 
-  // свернуть/развернуть
   icMin.onclick = () => { ui.classList.toggle('min'); icMin.textContent = ui.classList.contains('min') ? '▸' : '▾'; };
 
-  // КЛЮЧЕВОЕ: клик по кнопке не уводит фокус с игры (иначе SDL глохнет)
-  ui.querySelectorAll('button, .ic, .rst').forEach(b =>
-    b.addEventListener('mousedown', e => e.preventDefault()));
+  // клик по нашим контролам не уводит фокус с игры (иначе SDL глохнет)
+  [ui, dbgPanel].forEach(root => root.querySelectorAll('button, .ic, .rst, .tab')
+    .forEach(b => b.addEventListener('mousedown', e => e.preventDefault())));
 
   // зонд: что реально долетело до игры
   const probe = e => log(`${e.type} which=${e.which} key="${e.key}"`);
-  addEventListener('keydown',  probe, true);
+  addEventListener('keydown', probe, true);
   addEventListener('keypress', probe, true);
 
   // перетаскивание за шапку
@@ -254,12 +327,12 @@ export function buildUI() {
   addEventListener('mousemove', onMove);
   addEventListener('mouseup', onUp);
 
-  placeHighlight();   // показать рамку если область уже сохранена
+  syncReg();          // показать рамку + значения, если область сохранена
 
-  // стоп прошлого инстанса при перевставке/перезапуске (без кнопки закрытия)
+  // стоп прошлого инстанса при перевставке (без кнопки закрытия)
   window.__tarkanStop = () => {
     if (auto !== null) clearTimeout(auto);
-    clearInterval(countIv); if (ocrIv) clearInterval(ocrIv);
+    clearInterval(countIv); if (ocrIv) clearInterval(ocrIv); if (dbgIv) clearInterval(dbgIv);
     removeEventListener('keydown', probe, true);
     removeEventListener('keypress', probe, true);
     removeEventListener('resize', placeHighlight);
@@ -267,5 +340,6 @@ export function buildUI() {
     removeEventListener('mousemove', onMove);
     removeEventListener('mouseup', onUp);
     document.getElementById('tarkan-ocr-box')?.remove();
+    document.getElementById('tarkan-debug')?.remove();
   };
 }

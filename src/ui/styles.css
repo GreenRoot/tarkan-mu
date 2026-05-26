@@ -255,3 +255,144 @@
   border: 1px solid #5fe0c0;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 6px rgba(95, 224, 192, .5);
 }
+
+/* табы */
+#tarkan-bot-ui .tabbar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+
+#tarkan-bot-ui .tab {
+  flex: 1;
+  padding: 5px 2px;
+  text-align: center;
+  font-size: 10px;
+  border: 1px solid #243240;
+  border-radius: 6px;
+  color: #8aa1b0;
+  background: #0e1722;
+  cursor: pointer;
+}
+
+#tarkan-bot-ui .tab:hover {
+  color: #cfe;
+}
+
+#tarkan-bot-ui .tab.active {
+  color: #5fe0c0;
+  border-color: #2c6b58;
+  background: #16222e;
+}
+
+#tarkan-bot-ui .pane {
+  display: none;
+}
+
+#tarkan-bot-ui .pane.active {
+  display: block;
+}
+
+/* выезжающая дебаг-панель слева */
+#tarkan-debug {
+  position: fixed;
+  left: 8px;
+  top: 50%;
+  z-index: 2147483647;
+  width: 300px;
+  padding: 10px;
+  transform: translate(-115%, -50%);
+  transition: transform .2s ease;
+  border: 1px solid #243240;
+  border-radius: 11px;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #dce8f0;
+  background: linear-gradient(180deg, rgba(16, 22, 30, .98), rgba(9, 13, 18, .99));
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .6);
+  user-select: none;
+}
+
+#tarkan-debug.open {
+  transform: translate(0, -50%);
+}
+
+#tarkan-debug * {
+  box-sizing: border-box;
+  font: inherit;
+}
+
+#tarkan-debug .hd {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+#tarkan-debug .hd b {
+  flex: 1;
+  color: #5fe0c0;
+}
+
+#tarkan-debug .ic {
+  color: #8aa1b0;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+#tarkan-debug .ic:hover {
+  color: #fff;
+}
+
+#tarkan-debug canvas {
+  display: block;
+  width: 100%;
+  image-rendering: pixelated;
+  border: 1px solid #243240;
+  border-radius: 4px;
+  background: #0a0e13;
+}
+
+#tarkan-debug .dbgtxt {
+  margin: 7px 0;
+  text-align: center;
+  font-weight: 700;
+  color: #9bd9c4;
+}
+
+#tarkan-debug .row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+#tarkan-debug .nlbl {
+  flex: 0 0 14px;
+  color: #7fd9c0;
+  font-weight: 700;
+}
+
+#tarkan-debug .nval {
+  flex: 1;
+  text-align: center;
+  color: #dce8f0;
+}
+
+#tarkan-debug button {
+  padding: 3px 7px;
+  border: 1px solid #2c4254;
+  border-radius: 5px;
+  color: #dce8f0;
+  background: #16222e;
+  cursor: pointer;
+}
+
+#tarkan-debug button:hover {
+  background: #1f3242;
+}
+
+#tarkan-debug .leg {
+  margin-top: 8px;
+  font-size: 9px;
+  color: #6f87a0;
+  line-height: 1.5;
+}

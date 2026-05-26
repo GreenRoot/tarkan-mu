@@ -136,41 +136,54 @@ function dropSmall(boxes) {
   return boxes.filter(b => (b.y1 - b.y0) >= 0.5 * maxH);
 }
 
-// прочитать число из области; ok:false если калибровки нет/неуверенно/окно закрыто/вне лимита
-// Логика анти-мусора: метка "Уровень:" слева от числа. Берём только боксы,
-// похожие на выученную цифру (err<=maxErr), затем правейшую группу (метка отделена зазором).
-export async function readNumber({ maxErr = 0.2, max = Infinity } = {}) {
+// полный разбор области (для дебага И чтения). Возвращает bin, боксы с разметкой,
+// выбранную группу, число. Логика анти-мусора: метка "Уровень:" слева; берём боксы,
+// похожие на выученную цифру (err<=maxErr), затем правейший кластер (метка отделена зазором).
+export async function analyze({ maxErr = 0.2, max = Infinity } = {}) {
   const { GW, GH, templates } = ocrState;
   if (!ocrState.region) return { ok: false, reason: 'нет области' };
-  if (!Object.keys(templates).length) return { ok: false, reason: 'нет калибровки' };
-  const bin = binarize(await regionImageData());
-  const boxes = dropSmall(segment(bin));
-  if (!boxes.length) return { ok: false, reason: 'цифр не видно (окно закрыто?)' };
+  const { w, h, bin } = binarize(await regionImageData());
+  const hasTpl = Object.keys(templates).length > 0;
+  const boxes = dropSmall(segment({ w, h, bin })).map(b => {
+    const m = hasTpl ? matchGrid(normBox({ w, bin }, b, GW, GH), templates, GW, GH) : { digit: null, err: 1 };
+    return { ...b, digit: m.digit, err: m.err, used: false };
+  });
+  const base = { w, h, bin, boxes };
+  if (!hasTpl) return { ...base, ok: false, reason: 'нет калибровки' };
 
-  // оставляем только боксы, уверенно похожие на цифру
-  const cand = [];
-  for (const b of boxes) {
-    const m = matchGrid(normBox(bin, b, GW, GH), templates, GW, GH);
-    if (m.digit != null && m.err <= maxErr) cand.push({ b, digit: m.digit, err: m.err });
-  }
-  if (!cand.length) return { ok: false, reason: 'цифр не распознано' };
-
-  // кластеризация по горизонтальному разрыву; правейший кластер = число (метка левее)
-  const avgW = cand.reduce((s, o) => s + (o.b.x1 - o.b.x0), 0) / cand.length;
+  const cand = boxes.filter(b => b.digit != null && b.err <= maxErr);
+  if (!cand.length) return { ...base, ok: false, reason: 'цифр не распознано' };
+  const avgW = cand.reduce((s, b) => s + (b.x1 - b.x0), 0) / cand.length;
   const clusters = [[cand[0]]];
   for (let i = 1; i < cand.length; i++) {
-    const gap = cand[i].b.x0 - cand[i - 1].b.x1;
-    if (gap > 1.5 * avgW) clusters.push([cand[i]]);
-    else clusters[clusters.length - 1].push(cand[i]);
+    const gap = cand[i].x0 - cand[i - 1].x1;
+    if (gap > 1.5 * avgW) clusters.push([cand[i]]); else clusters[clusters.length - 1].push(cand[i]);
   }
   const group = clusters[clusters.length - 1];
-  const str = group.map(o => o.digit).join('');
-  const err = Math.max(...group.map(o => o.err));
-
+  group.forEach(b => { b.used = true; });
+  const str = group.map(b => b.digit).join('');
+  const err = Math.max(...group.map(b => b.err));
   const value = parseInt(str, 10);
-  if (!Number.isFinite(value)) return { ok: false, reason: 'не число' };
-  if (value > max) return { ok: false, reason: `${value} > лимита ${max}`, value, suspect: true };
-  return { ok: true, value, str, err };
+  if (!Number.isFinite(value)) return { ...base, ok: false, reason: 'не число' };
+  if (value > max) return { ...base, ok: false, reason: `${value} > лимита ${max}`, value, str, err, suspect: true };
+  return { ...base, ok: true, value, str, err };
+}
+
+// прочитать число (тонкая обёртка над analyze)
+export async function readNumber(opts) {
+  const a = await analyze(opts);
+  return a.ok ? { ok: true, value: a.value, str: a.str, err: a.err }
+              : { ok: false, reason: a.reason, value: a.value ?? null, suspect: !!a.suspect };
+}
+
+// сдвиг/изменение области по пикселям (дебаг-панель). p = {x?,y?,w?,h?} абсолютные значения
+export function setRegion(p) {
+  const r = ocrState.region || { x: 0, y: 0, w: 40, h: 18 };
+  Object.assign(r, p);
+  r.x = Math.max(0, Math.round(r.x)); r.y = Math.max(0, Math.round(r.y));
+  r.w = Math.max(2, Math.round(r.w)); r.h = Math.max(2, Math.round(r.h));
+  ocrState.region = r; save();
+  return r;
 }
 
 // обучить: known — число, реально видимое в рамке (напр. "380").

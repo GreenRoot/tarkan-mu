@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tarkan-bot
 // @namespace    tarkan.gg
-// @version      1.2.1
+// @version      1.3.0
 // @description  MU online: авто-ресет, раздача статов, скриншот canvas
 // @author       Санёк
 // @match        *://tarkan.gg/*
@@ -357,33 +357,51 @@
     const maxH = Math.max(...boxes.map((b) => b.y1 - b.y0));
     return boxes.filter((b) => b.y1 - b.y0 >= 0.5 * maxH);
   }
-  async function readNumber({ maxErr = 0.2, max = Infinity } = {}) {
+  async function analyze({ maxErr = 0.2, max = Infinity } = {}) {
     const { GW, GH, templates } = ocrState;
     if (!ocrState.region) return { ok: false, reason: "нет области" };
-    if (!Object.keys(templates).length) return { ok: false, reason: "нет калибровки" };
-    const bin = binarize(await regionImageData());
-    const boxes = dropSmall(segment(bin));
-    if (!boxes.length) return { ok: false, reason: "цифр не видно (окно закрыто?)" };
-    const cand = [];
-    for (const b of boxes) {
-      const m = matchGrid(normBox(bin, b, GW, GH), templates, GW, GH);
-      if (m.digit != null && m.err <= maxErr) cand.push({ b, digit: m.digit, err: m.err });
-    }
-    if (!cand.length) return { ok: false, reason: "цифр не распознано" };
-    const avgW = cand.reduce((s, o) => s + (o.b.x1 - o.b.x0), 0) / cand.length;
+    const { w, h, bin } = binarize(await regionImageData());
+    const hasTpl = Object.keys(templates).length > 0;
+    const boxes = dropSmall(segment({ w, h, bin })).map((b) => {
+      const m = hasTpl ? matchGrid(normBox({ w, bin }, b, GW, GH), templates, GW, GH) : { digit: null, err: 1 };
+      return { ...b, digit: m.digit, err: m.err, used: false };
+    });
+    const base = { w, h, bin, boxes };
+    if (!hasTpl) return { ...base, ok: false, reason: "нет калибровки" };
+    const cand = boxes.filter((b) => b.digit != null && b.err <= maxErr);
+    if (!cand.length) return { ...base, ok: false, reason: "цифр не распознано" };
+    const avgW = cand.reduce((s, b) => s + (b.x1 - b.x0), 0) / cand.length;
     const clusters = [[cand[0]]];
     for (let i = 1; i < cand.length; i++) {
-      const gap = cand[i].b.x0 - cand[i - 1].b.x1;
+      const gap = cand[i].x0 - cand[i - 1].x1;
       if (gap > 1.5 * avgW) clusters.push([cand[i]]);
       else clusters[clusters.length - 1].push(cand[i]);
     }
     const group = clusters[clusters.length - 1];
-    const str = group.map((o) => o.digit).join("");
-    const err = Math.max(...group.map((o) => o.err));
+    group.forEach((b) => {
+      b.used = true;
+    });
+    const str = group.map((b) => b.digit).join("");
+    const err = Math.max(...group.map((b) => b.err));
     const value = parseInt(str, 10);
-    if (!Number.isFinite(value)) return { ok: false, reason: "не число" };
-    if (value > max) return { ok: false, reason: `${value} > лимита ${max}`, value, suspect: true };
-    return { ok: true, value, str, err };
+    if (!Number.isFinite(value)) return { ...base, ok: false, reason: "не число" };
+    if (value > max) return { ...base, ok: false, reason: `${value} > лимита ${max}`, value, str, err, suspect: true };
+    return { ...base, ok: true, value, str, err };
+  }
+  async function readNumber(opts) {
+    const a = await analyze(opts);
+    return a.ok ? { ok: true, value: a.value, str: a.str, err: a.err } : { ok: false, reason: a.reason, value: a.value ?? null, suspect: !!a.suspect };
+  }
+  function setRegion(p) {
+    const r = ocrState.region || { x: 0, y: 0, w: 40, h: 18 };
+    Object.assign(r, p);
+    r.x = Math.max(0, Math.round(r.x));
+    r.y = Math.max(0, Math.round(r.y));
+    r.w = Math.max(2, Math.round(r.w));
+    r.h = Math.max(2, Math.round(r.h));
+    ocrState.region = r;
+    save();
+    return r;
   }
   async function teach(known) {
     known = String(known).trim();
@@ -429,7 +447,7 @@
   }
 
   // src/ui/styles.css
-  var styles_default = '/* Панель tarkan-bot. Подключается в JS как текст (esbuild loader .css = text). */\n\n#tarkan-bot-ui {\n  position: fixed;\n  left: 8px;\n  bottom: 8px;\n  z-index: 2147483647;\n  width: 250px;\n  overflow: hidden;\n  border: 1px solid #243240;\n  border-radius: 11px;\n  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;\n  color: #dce8f0;\n  background: linear-gradient(180deg, rgba(16, 22, 30, .97), rgba(9, 13, 18, .98));\n  box-shadow: 0 10px 34px rgba(0, 0, 0, .6);\n  backdrop-filter: blur(4px);\n  user-select: none;\n}\n\n#tarkan-bot-ui * {\n  box-sizing: border-box;\n  font: inherit;\n}\n\n/* шапка */\n#tarkan-bot-ui .hd {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  padding: 8px 10px;\n  cursor: move;\n  border-bottom: 1px solid #243240;\n  background: linear-gradient(180deg, #172533, #0d1620);\n}\n\n#tarkan-bot-ui .ttl {\n  flex: 1;\n  font-weight: 700;\n  letter-spacing: .4px;\n  color: #5fe0c0;\n}\n\n#tarkan-bot-ui .ic {\n  padding: 0 4px;\n  font-size: 12px;\n  color: #8aa1b0;\n  cursor: pointer;\n}\n\n#tarkan-bot-ui .ic:hover {\n  color: #fff;\n}\n\n/* тело + сворачивание */\n#tarkan-bot-ui .body {\n  padding: 8px 10px 10px;\n}\n\n#tarkan-bot-ui.min .body {\n  display: none;\n}\n\n/* заголовки секций */\n#tarkan-bot-ui .sec {\n  margin: 10px 0 3px;\n  font-size: 9px;\n  letter-spacing: 1.2px;\n  text-transform: uppercase;\n  color: #577086;\n}\n\n#tarkan-bot-ui .sec:first-child {\n  margin-top: 0;\n}\n\n/* строки */\n#tarkan-bot-ui .row {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 5px;\n  margin: 4px 0;\n}\n\n/* поля ввода */\n#tarkan-bot-ui input {\n  flex: 1;\n  min-width: 0;\n  padding: 4px 6px;\n  border: 1px solid #243240;\n  border-radius: 5px;\n  color: #dce8f0;\n  background: #070b10;\n  outline: none;\n}\n\n#tarkan-bot-ui input:focus {\n  border-color: #3f6f8f;\n}\n\n#tarkan-bot-ui input.sm {\n  flex: 0 0 52px;\n  text-align: center;\n}\n\n/* кнопки */\n#tarkan-bot-ui button {\n  padding: 4px 8px;\n  border: 1px solid #2c4254;\n  border-radius: 5px;\n  color: #dce8f0;\n  background: #16222e;\n  white-space: nowrap;\n  cursor: pointer;\n  transition: .1s;\n}\n\n#tarkan-bot-ui button:hover {\n  border-color: #3a5a72;\n  background: #1f3242;\n}\n\n#tarkan-bot-ui button:active {\n  transform: translateY(1px);\n}\n\n/* подписи и теги */\n#tarkan-bot-ui .tag {\n  flex: 0 0 24px;\n  text-align: center;\n  font-weight: 700;\n  color: #7fd9c0;\n}\n\n#tarkan-bot-ui .lbl {\n  flex: 0 0 auto;\n  padding: 0 1px;\n  color: #6f87a0;\n}\n\n#tarkan-bot-ui .ocrval {\n  flex: 1;\n  text-align: right;\n  font-weight: 700;\n  color: #9bd9c4;\n}\n\n/* кнопка "го" у статов */\n#tarkan-bot-ui .go {\n  flex: 0 0 40px;\n  text-align: center;\n  font-weight: 700;\n  border-color: #1c6b48;\n  color: #7df0b8;\n  background: #123e2c;\n}\n\n#tarkan-bot-ui .go:hover {\n  background: #1a5c40;\n}\n\n/* большая красная кнопка RESET MZFK */\n#tarkan-bot-ui .big {\n  width: 100%;\n  margin-top: 9px;\n  padding: 9px;\n  font-weight: 700;\n  letter-spacing: .6px;\n  border-color: #c44;\n  color: #ffe6e0;\n  background: linear-gradient(180deg, #8a2222, #681616);\n}\n\n#tarkan-bot-ui .big:hover {\n  background: linear-gradient(180deg, #a82a2a, #7e1e1e);\n}\n\n/* зелёная кнопка авто-запуска (.on = активна, красная) */\n#tarkan-bot-ui .run {\n  width: 100%;\n  margin-top: 6px;\n  padding: 8px;\n  font-weight: 700;\n  letter-spacing: .4px;\n  border-color: #1c8b5a;\n  color: #cffce4;\n  background: linear-gradient(180deg, #15633f, #0d4a2e);\n}\n\n#tarkan-bot-ui .run:hover {\n  background: linear-gradient(180deg, #1a7a4d, #115a39);\n}\n\n#tarkan-bot-ui .run.on {\n  border-color: #d55;\n  color: #ffe6e0;\n  background: linear-gradient(180deg, #8a2222, #681616);\n}\n\n/* обратный отсчёт до след. ресета */\n#tarkan-bot-ui .count {\n  margin-top: 7px;\n  min-height: 14px;\n  text-align: center;\n  font-weight: 700;\n  letter-spacing: .5px;\n  color: #9bd9c4;\n}\n\n/* статистика + крестик сброса */\n#tarkan-bot-ui .stats {\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  gap: 6px;\n  margin-top: 7px;\n  font-size: 10px;\n  color: #7088a0;\n}\n\n#tarkan-bot-ui .rst {\n  padding: 0 4px;\n  line-height: 14px;\n  font-size: 9px;\n  border: 1px solid #2a3a4a;\n  border-radius: 3px;\n  color: #5a6f82;\n  cursor: pointer;\n}\n\n#tarkan-bot-ui .rst:hover {\n  border-color: #a44;\n  color: #ff9a9a;\n}\n\n/* лог */\n#tarkan-bot-ui .log {\n  margin-top: 9px;\n  padding: 6px 8px;\n  min-height: 15px;\n  font-size: 10px;\n  word-break: break-all;\n  border: 1px solid #1a2530;\n  border-radius: 5px;\n  color: #7fb89f;\n  background: #070b10;\n}\n\n/* рамка читаемой OCR-области (отдельный элемент поверх canvas) */\n#tarkan-ocr-box {\n  position: fixed;\n  z-index: 2147483646;\n  display: none;\n  pointer-events: none;\n  border: 1px solid #5fe0c0;\n  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 6px rgba(95, 224, 192, .5);\n}\n';
+  var styles_default = '/* Панель tarkan-bot. Подключается в JS как текст (esbuild loader .css = text). */\n\n#tarkan-bot-ui {\n  position: fixed;\n  left: 8px;\n  bottom: 8px;\n  z-index: 2147483647;\n  width: 250px;\n  overflow: hidden;\n  border: 1px solid #243240;\n  border-radius: 11px;\n  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;\n  color: #dce8f0;\n  background: linear-gradient(180deg, rgba(16, 22, 30, .97), rgba(9, 13, 18, .98));\n  box-shadow: 0 10px 34px rgba(0, 0, 0, .6);\n  backdrop-filter: blur(4px);\n  user-select: none;\n}\n\n#tarkan-bot-ui * {\n  box-sizing: border-box;\n  font: inherit;\n}\n\n/* шапка */\n#tarkan-bot-ui .hd {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  padding: 8px 10px;\n  cursor: move;\n  border-bottom: 1px solid #243240;\n  background: linear-gradient(180deg, #172533, #0d1620);\n}\n\n#tarkan-bot-ui .ttl {\n  flex: 1;\n  font-weight: 700;\n  letter-spacing: .4px;\n  color: #5fe0c0;\n}\n\n#tarkan-bot-ui .ic {\n  padding: 0 4px;\n  font-size: 12px;\n  color: #8aa1b0;\n  cursor: pointer;\n}\n\n#tarkan-bot-ui .ic:hover {\n  color: #fff;\n}\n\n/* тело + сворачивание */\n#tarkan-bot-ui .body {\n  padding: 8px 10px 10px;\n}\n\n#tarkan-bot-ui.min .body {\n  display: none;\n}\n\n/* заголовки секций */\n#tarkan-bot-ui .sec {\n  margin: 10px 0 3px;\n  font-size: 9px;\n  letter-spacing: 1.2px;\n  text-transform: uppercase;\n  color: #577086;\n}\n\n#tarkan-bot-ui .sec:first-child {\n  margin-top: 0;\n}\n\n/* строки */\n#tarkan-bot-ui .row {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 5px;\n  margin: 4px 0;\n}\n\n/* поля ввода */\n#tarkan-bot-ui input {\n  flex: 1;\n  min-width: 0;\n  padding: 4px 6px;\n  border: 1px solid #243240;\n  border-radius: 5px;\n  color: #dce8f0;\n  background: #070b10;\n  outline: none;\n}\n\n#tarkan-bot-ui input:focus {\n  border-color: #3f6f8f;\n}\n\n#tarkan-bot-ui input.sm {\n  flex: 0 0 52px;\n  text-align: center;\n}\n\n/* кнопки */\n#tarkan-bot-ui button {\n  padding: 4px 8px;\n  border: 1px solid #2c4254;\n  border-radius: 5px;\n  color: #dce8f0;\n  background: #16222e;\n  white-space: nowrap;\n  cursor: pointer;\n  transition: .1s;\n}\n\n#tarkan-bot-ui button:hover {\n  border-color: #3a5a72;\n  background: #1f3242;\n}\n\n#tarkan-bot-ui button:active {\n  transform: translateY(1px);\n}\n\n/* подписи и теги */\n#tarkan-bot-ui .tag {\n  flex: 0 0 24px;\n  text-align: center;\n  font-weight: 700;\n  color: #7fd9c0;\n}\n\n#tarkan-bot-ui .lbl {\n  flex: 0 0 auto;\n  padding: 0 1px;\n  color: #6f87a0;\n}\n\n#tarkan-bot-ui .ocrval {\n  flex: 1;\n  text-align: right;\n  font-weight: 700;\n  color: #9bd9c4;\n}\n\n/* кнопка "го" у статов */\n#tarkan-bot-ui .go {\n  flex: 0 0 40px;\n  text-align: center;\n  font-weight: 700;\n  border-color: #1c6b48;\n  color: #7df0b8;\n  background: #123e2c;\n}\n\n#tarkan-bot-ui .go:hover {\n  background: #1a5c40;\n}\n\n/* большая красная кнопка RESET MZFK */\n#tarkan-bot-ui .big {\n  width: 100%;\n  margin-top: 9px;\n  padding: 9px;\n  font-weight: 700;\n  letter-spacing: .6px;\n  border-color: #c44;\n  color: #ffe6e0;\n  background: linear-gradient(180deg, #8a2222, #681616);\n}\n\n#tarkan-bot-ui .big:hover {\n  background: linear-gradient(180deg, #a82a2a, #7e1e1e);\n}\n\n/* зелёная кнопка авто-запуска (.on = активна, красная) */\n#tarkan-bot-ui .run {\n  width: 100%;\n  margin-top: 6px;\n  padding: 8px;\n  font-weight: 700;\n  letter-spacing: .4px;\n  border-color: #1c8b5a;\n  color: #cffce4;\n  background: linear-gradient(180deg, #15633f, #0d4a2e);\n}\n\n#tarkan-bot-ui .run:hover {\n  background: linear-gradient(180deg, #1a7a4d, #115a39);\n}\n\n#tarkan-bot-ui .run.on {\n  border-color: #d55;\n  color: #ffe6e0;\n  background: linear-gradient(180deg, #8a2222, #681616);\n}\n\n/* обратный отсчёт до след. ресета */\n#tarkan-bot-ui .count {\n  margin-top: 7px;\n  min-height: 14px;\n  text-align: center;\n  font-weight: 700;\n  letter-spacing: .5px;\n  color: #9bd9c4;\n}\n\n/* статистика + крестик сброса */\n#tarkan-bot-ui .stats {\n  display: flex;\n  justify-content: center;\n  align-items: center;\n  gap: 6px;\n  margin-top: 7px;\n  font-size: 10px;\n  color: #7088a0;\n}\n\n#tarkan-bot-ui .rst {\n  padding: 0 4px;\n  line-height: 14px;\n  font-size: 9px;\n  border: 1px solid #2a3a4a;\n  border-radius: 3px;\n  color: #5a6f82;\n  cursor: pointer;\n}\n\n#tarkan-bot-ui .rst:hover {\n  border-color: #a44;\n  color: #ff9a9a;\n}\n\n/* лог */\n#tarkan-bot-ui .log {\n  margin-top: 9px;\n  padding: 6px 8px;\n  min-height: 15px;\n  font-size: 10px;\n  word-break: break-all;\n  border: 1px solid #1a2530;\n  border-radius: 5px;\n  color: #7fb89f;\n  background: #070b10;\n}\n\n/* рамка читаемой OCR-области (отдельный элемент поверх canvas) */\n#tarkan-ocr-box {\n  position: fixed;\n  z-index: 2147483646;\n  display: none;\n  pointer-events: none;\n  border: 1px solid #5fe0c0;\n  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 0 6px rgba(95, 224, 192, .5);\n}\n\n/* табы */\n#tarkan-bot-ui .tabbar {\n  display: flex;\n  gap: 4px;\n  margin-bottom: 7px;\n}\n\n#tarkan-bot-ui .tab {\n  flex: 1;\n  padding: 5px 2px;\n  text-align: center;\n  font-size: 10px;\n  border: 1px solid #243240;\n  border-radius: 6px;\n  color: #8aa1b0;\n  background: #0e1722;\n  cursor: pointer;\n}\n\n#tarkan-bot-ui .tab:hover {\n  color: #cfe;\n}\n\n#tarkan-bot-ui .tab.active {\n  color: #5fe0c0;\n  border-color: #2c6b58;\n  background: #16222e;\n}\n\n#tarkan-bot-ui .pane {\n  display: none;\n}\n\n#tarkan-bot-ui .pane.active {\n  display: block;\n}\n\n/* выезжающая дебаг-панель слева */\n#tarkan-debug {\n  position: fixed;\n  left: 8px;\n  top: 50%;\n  z-index: 2147483647;\n  width: 300px;\n  padding: 10px;\n  transform: translate(-115%, -50%);\n  transition: transform .2s ease;\n  border: 1px solid #243240;\n  border-radius: 11px;\n  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;\n  color: #dce8f0;\n  background: linear-gradient(180deg, rgba(16, 22, 30, .98), rgba(9, 13, 18, .99));\n  box-shadow: 0 10px 34px rgba(0, 0, 0, .6);\n  user-select: none;\n}\n\n#tarkan-debug.open {\n  transform: translate(0, -50%);\n}\n\n#tarkan-debug * {\n  box-sizing: border-box;\n  font: inherit;\n}\n\n#tarkan-debug .hd {\n  display: flex;\n  align-items: center;\n  margin-bottom: 8px;\n}\n\n#tarkan-debug .hd b {\n  flex: 1;\n  color: #5fe0c0;\n}\n\n#tarkan-debug .ic {\n  color: #8aa1b0;\n  cursor: pointer;\n  padding: 0 4px;\n}\n\n#tarkan-debug .ic:hover {\n  color: #fff;\n}\n\n#tarkan-debug canvas {\n  display: block;\n  width: 100%;\n  image-rendering: pixelated;\n  border: 1px solid #243240;\n  border-radius: 4px;\n  background: #0a0e13;\n}\n\n#tarkan-debug .dbgtxt {\n  margin: 7px 0;\n  text-align: center;\n  font-weight: 700;\n  color: #9bd9c4;\n}\n\n#tarkan-debug .row {\n  display: flex;\n  align-items: center;\n  gap: 4px;\n  margin: 4px 0;\n}\n\n#tarkan-debug .nlbl {\n  flex: 0 0 14px;\n  color: #7fd9c0;\n  font-weight: 700;\n}\n\n#tarkan-debug .nval {\n  flex: 1;\n  text-align: center;\n  color: #dce8f0;\n}\n\n#tarkan-debug button {\n  padding: 3px 7px;\n  border: 1px solid #2c4254;\n  border-radius: 5px;\n  color: #dce8f0;\n  background: #16222e;\n  cursor: pointer;\n}\n\n#tarkan-debug button:hover {\n  background: #1f3242;\n}\n\n#tarkan-debug .leg {\n  margin-top: 8px;\n  font-size: 9px;\n  color: #6f87a0;\n  line-height: 1.5;\n}\n';
 
   // src/ui/panel.js
   function buildUI() {
@@ -441,11 +459,14 @@
     }
     document.getElementById("tarkan-bot-ui")?.remove();
     document.getElementById("tarkan-ocr-box")?.remove();
+    document.getElementById("tarkan-debug")?.remove();
     document.head.appendChild(el("style", {}, styles_default));
     const logEl = el("div", { class: "log" }, "готов · жми кнопку");
     const log = (m) => {
       logEl.textContent = m;
     };
+    const sec = (t) => el("div", { class: "sec" }, t);
+    const lbl = (t) => el("span", { class: "lbl" }, t);
     const ttlEl = el("span", { class: "ttl" }, "⚡ tarkan-bot");
     const setLevel = (v) => {
       ttlEl.textContent = v == null ? "⚡ tarkan-bot" : `⚡ tarkan-bot · ур ${v}`;
@@ -476,7 +497,13 @@
     timingInputs.gap = iGap;
     const iBase = el("input", { class: "sm", value: String(AUTO_BASE) });
     const iStep = el("input", { class: "sm", value: String(AUTO_STEP) });
-    [iCmd, iAfter, iGap, iBase, iStep].forEach(makeEditable);
+    const iLvl = el("input", { class: "sm", value: "380" });
+    const iMax = el("input", { class: "sm", value: "400" });
+    const iPoll = el("input", { class: "sm", value: "3" });
+    const iErr = el("input", { class: "sm", value: "18" });
+    [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr].forEach(makeEditable);
+    const readMax = () => +iMax.value || 400;
+    const readErr = () => (+iErr.value || 18) / 100;
     const statRow = (k) => {
       const inp = el("input", { value: String(STAT_DEFAULTS[k]) });
       const inc = el("input", { class: "sm", value: String(INC_DEFAULTS[k]) });
@@ -499,7 +526,7 @@
         { class: "row" },
         el("span", { class: "tag" }, "/" + k),
         inp,
-        el("span", { class: "lbl" }, "+"),
+        lbl("+"),
         inc,
         go
       );
@@ -555,10 +582,7 @@
       });
       renderStats();
     };
-    let auto = null;
-    let countIv = null;
-    let nextAt = 0;
-    let curInt = 0;
+    let auto = null, countIv = null, nextAt = 0, curInt = 0;
     const countEl = el("div", { class: "count" }, "");
     const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
     const tick = () => {
@@ -608,26 +632,20 @@
       await doReset();
       if (auto !== null) scheduleNext();
     };
-    const iLvl = el("input", { class: "sm", value: "380" });
-    const iMax = el("input", { class: "sm", value: "400" });
-    const iPoll = el("input", { class: "sm", value: "3" });
-    const iErr = el("input", { class: "sm", value: "18" });
-    [iLvl, iMax, iPoll, iErr].forEach(makeEditable);
     const ocrVal = el("span", { class: "ocrval" }, ocrState.region ? "—" : "нет обл.");
-    const readMax = () => +iMax.value || 400;
-    const readErr = () => (+iErr.value || 18) / 100;
     const bRegion = el("button", { onclick: async () => {
       log("тяни рамку по числу (Esc — отмена)");
       const r = await pickRegion();
       log(r ? `область ${r.w}×${r.h}` : "отмена");
       ocrVal.textContent = r ? "—" : "нет обл.";
-      placeHighlight();
+      syncReg();
     } }, "обл.");
     const bTeach = el("button", { onclick: async () => {
       const known = prompt("Какое число сейчас в рамке? (обучение цифр)");
       if (!known) return;
       const res = await teach(known);
       log(res.ok ? `выучены цифры: ${res.learned}` : `учить: ${res.reason}`);
+      if (dbgIv) refreshDbg();
     } }, "учить");
     const bTest = el("button", { onclick: async () => {
       const r = await readNumber({ maxErr: readErr(), max: readMax() });
@@ -658,14 +676,14 @@
         return;
       }
       if (!ocrState.region) {
-        log("сначала задай область (обл.)");
+        log("сначала задай область (вкладка OCR)");
         return;
       }
       if (!Object.keys(ocrState.templates).length) {
-        log("сначала откалибруй (учить)");
+        log("сначала откалибруй (вкладка OCR → учить)");
         return;
       }
-      const sec2 = Math.max(1, +iPoll.value || 3);
+      const s = Math.max(1, +iPoll.value || 3);
       bLvlAuto.classList.add("on");
       bLvlAuto.textContent = "⏹ стоп ур.";
       log("ур-авто старт");
@@ -692,15 +710,100 @@
         } finally {
           ocrBusy = false;
         }
-      }, sec2 * 1e3);
+      }, s * 1e3);
     };
-    const icMin = el("span", { class: "ic", title: "свернуть" }, "▾");
-    const hd = el("div", { class: "hd" }, ttlEl, icMin);
-    const sec = (t) => el("div", { class: "sec" }, t);
-    const lbl = (t) => el("span", { class: "lbl" }, t);
-    const body = el(
+    let dbgIv = null;
+    const dbgCanvas = el("canvas", {});
+    const dbgTxt = el("div", { class: "dbgtxt" }, "—");
+    const drawDebug = (a) => {
+      const S = 5, w = a.w, h = a.h;
+      dbgCanvas.width = w * S;
+      dbgCanvas.height = h * S + 12;
+      const x = dbgCanvas.getContext("2d");
+      x.fillStyle = "#0a0e13";
+      x.fillRect(0, 0, dbgCanvas.width, dbgCanvas.height);
+      x.fillStyle = "#cfe";
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (a.bin[yy * w + xx]) x.fillRect(xx * S, yy * S + 12, S, S);
+      x.lineWidth = 1;
+      x.font = "bold 10px monospace";
+      x.textBaseline = "bottom";
+      for (const b of a.boxes) {
+        const col = b.used ? "#5fe0c0" : b.digit != null && b.err <= readErr() ? "#ffd25f" : "#e0556a";
+        x.strokeStyle = col;
+        x.strokeRect(b.x0 * S + 0.5, b.y0 * S + 12.5, (b.x1 - b.x0) * S - 1, (b.y1 - b.y0) * S - 1);
+        x.fillStyle = col;
+        x.fillText(b.digit != null ? `${b.digit}·${Math.round(b.err * 100)}` : "?", b.x0 * S, b.y0 * S + 11);
+      }
+    };
+    const refreshDbg = async () => {
+      if (!ocrState.region) {
+        dbgTxt.textContent = "нет области";
+        return;
+      }
+      try {
+        const a = await analyze({ maxErr: readErr(), max: readMax() });
+        if (a.bin) drawDebug(a);
+        dbgTxt.textContent = a.ok ? `= ${a.value} (err ${Math.round(a.err * 100)}%)` : `— ${a.reason}`;
+        if (a.ok) setLevel(a.value);
+        syncReg();
+      } catch (e) {
+        dbgTxt.textContent = "ошибка чтения";
+      }
+    };
+    const regSpan = {};
+    const syncReg = () => {
+      const r = ocrState.region;
+      ["x", "y", "w", "h"].forEach((a) => {
+        if (regSpan[a]) regSpan[a].textContent = r ? r[a] : "—";
+      });
+      placeHighlight();
+    };
+    const nudRow = (axis) => {
+      const val = el("span", { class: "nval" }, "—");
+      regSpan[axis] = val;
+      const mk = (d) => el("button", { onclick: () => {
+        const r = ocrState.region || { x: 0, y: 0, w: 40, h: 18 };
+        setRegion({ [axis]: (r[axis] || 0) + d });
+        syncReg();
+        refreshDbg();
+      } }, (d > 0 ? "+" : "") + d);
+      return el("div", { class: "row" }, el("span", { class: "nlbl" }, axis), mk(-10), mk(-1), val, mk(1), mk(10));
+    };
+    const dbgClose = el("span", { class: "ic" }, "✕");
+    const dbgPanel = el(
       "div",
-      { class: "body" },
+      { id: "tarkan-debug" },
+      el("div", { class: "hd" }, el("b", {}, "OCR debug"), dbgClose),
+      dbgCanvas,
+      dbgTxt,
+      nudRow("x"),
+      nudRow("y"),
+      nudRow("w"),
+      nudRow("h"),
+      el("div", { class: "leg" }, "рамки: cyan = взято в число · yellow = кандидат · red = мусор. подпись = цифра·ошибка%")
+    );
+    document.body.appendChild(dbgPanel);
+    const closeDbg = () => {
+      dbgPanel.classList.remove("open");
+      if (dbgIv) {
+        clearInterval(dbgIv);
+        dbgIv = null;
+      }
+    };
+    dbgClose.onclick = closeDbg;
+    const bDbg = el("button", { onclick: () => {
+      if (dbgPanel.classList.contains("open")) {
+        closeDbg();
+        return;
+      }
+      dbgPanel.classList.add("open");
+      syncReg();
+      refreshDbg();
+      dbgIv = setInterval(refreshDbg, 800);
+    } }, "🔧 дебаг");
+    const paneInput = el(
+      "div",
+      { class: "pane active" },
       el("div", { class: "row" }, bOpen, bSend2, bEsc, bShot),
       el("div", { class: "row" }, iCmd, bSend),
       sec("статы · 0 = пропуск"),
@@ -708,28 +811,66 @@
       statRow("e"),
       statRow("f"),
       statRow("v"),
-      bMacro,
+      bMacro
+    );
+    const paneTimer = el(
+      "div",
+      { class: "pane" },
       sec("паузы, мс"),
       el("div", { class: "row" }, lbl("после reset"), iAfter, lbl("между"), iGap),
       sec("авто, сек"),
       el("div", { class: "row" }, lbl("база"), iBase, lbl("+ за ресет"), iStep),
       countEl,
-      bAuto,
-      sec("чтение экрана (OCR)"),
-      el("div", { class: "row" }, bRegion, bTeach, bTest, bEye, lbl("="), ocrVal),
-      el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("≤"), iMax, lbl("опрос"), iPoll, lbl("с")),
-      el("div", { class: "row" }, lbl("ошибка ≤"), iErr, lbl("%")),
-      bLvlAuto,
-      statsEl,
-      logEl
+      bAuto
     );
+    const paneLevel = el(
+      "div",
+      { class: "pane" },
+      sec("ресет по уровню (OCR)"),
+      el("div", { class: "row" }, lbl("ур ≥"), iLvl, lbl("≤"), iMax),
+      el("div", { class: "row" }, lbl("опрос"), iPoll, lbl("с"), lbl("ошибка ≤"), iErr, lbl("%")),
+      bLvlAuto
+    );
+    const paneOcr = el(
+      "div",
+      { class: "pane" },
+      sec("область / калибровка"),
+      el("div", { class: "row" }, bRegion, bEye, bDbg),
+      el("div", { class: "row" }, bTeach, bTest, lbl("="), ocrVal)
+    );
+    const panes = [];
+    const mkTab = (name, pane) => {
+      const t = el("div", { class: "tab" }, name);
+      t.onclick = () => {
+        panes.forEach(([tb, pn]) => {
+          tb.classList.remove("active");
+          pn.classList.remove("active");
+        });
+        t.classList.add("active");
+        pane.classList.add("active");
+      };
+      panes.push([t, pane]);
+      return t;
+    };
+    const tabbar = el(
+      "div",
+      { class: "tabbar" },
+      mkTab("ввод", paneInput),
+      mkTab("таймер", paneTimer),
+      mkTab("уровень", paneLevel),
+      mkTab("OCR", paneOcr)
+    );
+    panes[0][0].classList.add("active");
+    const icMin = el("span", { class: "ic", title: "свернуть" }, "▾");
+    const hd = el("div", { class: "hd" }, ttlEl, icMin);
+    const body = el("div", { class: "body" }, tabbar, paneInput, paneTimer, paneLevel, paneOcr, statsEl, logEl);
     const ui = el("div", { id: "tarkan-bot-ui" }, hd, body);
     document.body.appendChild(ui);
     icMin.onclick = () => {
       ui.classList.toggle("min");
       icMin.textContent = ui.classList.contains("min") ? "▸" : "▾";
     };
-    ui.querySelectorAll("button, .ic, .rst").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
+    [ui, dbgPanel].forEach((root) => root.querySelectorAll("button, .ic, .rst, .tab").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault())));
     const probe = (e) => log(`${e.type} which=${e.which} key="${e.key}"`);
     addEventListener("keydown", probe, true);
     addEventListener("keypress", probe, true);
@@ -749,11 +890,12 @@
     const onUp = () => drag = null;
     addEventListener("mousemove", onMove);
     addEventListener("mouseup", onUp);
-    placeHighlight();
+    syncReg();
     window.__tarkanStop = () => {
       if (auto !== null) clearTimeout(auto);
       clearInterval(countIv);
       if (ocrIv) clearInterval(ocrIv);
+      if (dbgIv) clearInterval(dbgIv);
       removeEventListener("keydown", probe, true);
       removeEventListener("keypress", probe, true);
       removeEventListener("resize", placeHighlight);
@@ -761,6 +903,7 @@
       removeEventListener("mousemove", onMove);
       removeEventListener("mouseup", onUp);
       document.getElementById("tarkan-ocr-box")?.remove();
+      document.getElementById("tarkan-debug")?.remove();
     };
   }
 
@@ -783,6 +926,8 @@
       pickRegion,
       readNumber,
       teach,
+      analyze,
+      setRegion,
       ocrState
     });
     console.log(
