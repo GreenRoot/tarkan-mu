@@ -49,6 +49,7 @@ export function buildUI() {
   const iCmd   = el('input', { value: '/reset' });
   const iAfter = el('input', { class: 'sm', value: String(TIMING.afterReset) }); timingInputs.afterReset = iAfter;
   const iGap   = el('input', { class: 'sm', value: String(TIMING.gap) });        timingInputs.gap = iGap;
+  const iChar  = el('input', { class: 'sm', value: String(TIMING.char) });       timingInputs.char = iChar;
   const iBase  = el('input', { class: 'sm', value: String(AUTO_BASE) });
   const iStep  = el('input', { class: 'sm', value: String(AUTO_STEP) });
   const iLvl   = el('input', { class: 'sm', value: '380' });  // порог уровня
@@ -57,7 +58,7 @@ export function buildUI() {
   const iErr   = el('input', { class: 'sm', value: '12' });   // макс ошибка совпадения, % (серошкала)
   const iThr   = el('input', { class: 'sm', value: '0' });    // ручной порог бинаризации (0=авто)
   const iLost  = el('input', { class: 'sm', value: '5' });    // нет уровня N сек -> нажать C
-  [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
+  [iCmd, iAfter, iGap, iChar, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
   const readMax = () => +iMax.value || 400;
   const readErr = () => (+iErr.value || 12) / 100;
   const readThr = () => +iThr.value || 0;
@@ -70,7 +71,7 @@ export function buildUI() {
     const go = el('button', { class: 'go', onclick: () => {
       const v = +inp.value || 0;
       if (v <= 0) { log(`/${k}: 0 — пропуск`); return; }
-      focusGame(); chatCommand(`/${k} ${v}`); log(`/${k} ${v}`);
+      focusGame(); chatCommand(`/${k} ${v}`, { charDelay: +iChar.value || 12 }); log(`/${k} ${v}`);
     } }, 'го');
     return el('div', { class: 'row' }, el('span', { class: 'tag' }, '/' + k), inp,
       lbl('+'), inc, go);
@@ -81,7 +82,7 @@ export function buildUI() {
   const bSend2 = el('button', { onclick: () => { focusGame(); ENTER(); log('send'); } }, '⏎send');
   const bEsc   = el('button', { onclick: () => { ESCAPE(); log('Esc'); } }, 'Esc');
   const bShot  = el('button', { onclick: () => { log('📷...'); showShot(); } }, '📷');
-  const bSend  = el('button', { onclick: () => { focusGame(); chatCommand(iCmd.value); } }, 'send');
+  const bSend  = el('button', { onclick: () => { focusGame(); chatCommand(iCmd.value, { charDelay: +iChar.value || 12 }); } }, 'send');
   const bMacro = el('button', { class: 'big', onclick: () => {
     log('RESET MZFK...'); doReset().then(() => log('RESET MZFK ✓')); } }, '⚡ RESET MZFK');
 
@@ -295,6 +296,7 @@ export function buildUI() {
   const paneTimer = el('div', { class: 'pane' },
     sec('паузы, мс'),
     el('div', { class: 'row' }, lbl('после reset'), iAfter, lbl('между'), iGap),
+    el('div', { class: 'row' }, lbl('печать мс/симв'), iChar),
     sec('авто, сек'),
     el('div', { class: 'row' }, lbl('база'), iBase, lbl('+ за ресет'), iStep),
     countEl,
@@ -360,7 +362,7 @@ export function buildUI() {
   // --- сохранение всех настроек в localStorage (переживают перезагрузку) -----
   const CFG = 'tarkanbot.cfg';
   const cfgMap = () => ({
-    cmd: iCmd, after: iAfter, gap: iGap, base: iBase, step: iStep,
+    cmd: iCmd, after: iAfter, gap: iGap, char: iChar, base: iBase, step: iStep,
     lvl: iLvl, max: iMax, poll: iPoll, err: iErr, thr: iThr, lost: iLost,
     ...Object.fromEntries(STAT_KEYS.map(k => ['s_' + k, statInputs[k]])),
     ...Object.fromEntries(STAT_KEYS.map(k => ['i_' + k, incInputs[k]])),

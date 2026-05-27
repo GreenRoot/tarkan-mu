@@ -10,13 +10,14 @@ import { statVal, timingVal } from './state.js';
 export async function resetMzfk(afterReset, gap) {
   afterReset = afterReset ?? timingVal('afterReset');
   gap        = gap        ?? timingVal('gap');
+  const opts = { openDelay: timingVal('open'), charDelay: timingVal('char'), sendDelay: timingVal('send') };
   focusGame();
-  await chatCommand('/reset', { openDelay: 120, charDelay: 25, sendDelay: 120 });
-  await sleep(afterReset);                       // даём серверу применить ресет
+  await chatCommand('/reset', opts);
+  await sleep(afterReset);                        // даём серверу применить ресет
   for (const k of STAT_KEYS) {
     const v = statVal(k);
-    if (v <= 0) continue;                        // 0 -> команда не выполняется
-    await chatCommand(`/${k} ${v}`, { openDelay: 120, charDelay: 25, sendDelay: 120 });
+    if (v <= 0) continue;                         // 0 -> команда не выполняется
+    await chatCommand(`/${k} ${v}`, opts);
     await sleep(gap);
   }
 }

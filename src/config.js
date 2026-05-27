@@ -4,6 +4,7 @@
 export const STAT_KEYS     = ['a', 'e', 'f', 'v'];
 export const STAT_DEFAULTS = { a: 14982, e: 14970, f: 982, v: 985 };
 export const INC_DEFAULTS  = { a: 50, e: 50, f: 50, v: 0 };   // прибавка к стату за ресет
-export const TIMING        = { afterReset: 800, gap: 800 };   // мс
+export const TIMING        = { afterReset: 800, gap: 800,     // мс между ресетом и статами / между командами
+                               char: 12, open: 90, send: 90 }; // мс: печать/символ, пауза открытия чата, перед отправкой
 export const AUTO_BASE     = 300;   // сек — базовый интервал авто-повтора
 export const AUTO_STEP     = 10;    // сек — прибавка к интервалу за каждый ресет

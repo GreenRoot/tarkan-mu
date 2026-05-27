@@ -11,7 +11,7 @@ export async function typeText(str, delay = 30) {
 }
 
 // открыть чат -> напечатать -> отправить
-export async function chatCommand(cmd, { openDelay = 150, charDelay = 40, sendDelay = 150 } = {}) {
+export async function chatCommand(cmd, { openDelay = 90, charDelay = 12, sendDelay = 90 } = {}) {
   focusGame();              // вернуть фокус игре, иначе ввод игнорируется
   await ENTER();            // открыть чат
   await sleep(openDelay);

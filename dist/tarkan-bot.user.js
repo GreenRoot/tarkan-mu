@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         tarkan-bot
 // @namespace    tarkan.gg
-// @version      1.6.0
+// @version      1.7.0
 // @description  MU online: авто-ресет, раздача статов, скриншот canvas
 // @author       Санёк
 // @match        *://tarkan.gg/*
@@ -87,7 +87,7 @@
       await sleep(delay);
     }
   }
-  async function chatCommand(cmd, { openDelay = 150, charDelay = 40, sendDelay = 150 } = {}) {
+  async function chatCommand(cmd, { openDelay = 90, charDelay = 12, sendDelay = 90 } = {}) {
     focusGame();
     await ENTER();
     await sleep(openDelay);
@@ -100,7 +100,14 @@
   var STAT_KEYS = ["a", "e", "f", "v"];
   var STAT_DEFAULTS = { a: 14982, e: 14970, f: 982, v: 985 };
   var INC_DEFAULTS = { a: 50, e: 50, f: 50, v: 0 };
-  var TIMING = { afterReset: 800, gap: 800 };
+  var TIMING = {
+    afterReset: 800,
+    gap: 800,
+    // мс между ресетом и статами / между командами
+    char: 12,
+    open: 90,
+    send: 90
+  };
   var AUTO_BASE = 300;
   var AUTO_STEP = 10;
 
@@ -116,13 +123,14 @@
   async function resetMzfk(afterReset, gap) {
     afterReset = afterReset ?? timingVal("afterReset");
     gap = gap ?? timingVal("gap");
+    const opts = { openDelay: timingVal("open"), charDelay: timingVal("char"), sendDelay: timingVal("send") };
     focusGame();
-    await chatCommand("/reset", { openDelay: 120, charDelay: 25, sendDelay: 120 });
+    await chatCommand("/reset", opts);
     await sleep(afterReset);
     for (const k of STAT_KEYS) {
       const v = statVal(k);
       if (v <= 0) continue;
-      await chatCommand(`/${k} ${v}`, { openDelay: 120, charDelay: 25, sendDelay: 120 });
+      await chatCommand(`/${k} ${v}`, opts);
       await sleep(gap);
     }
   }
@@ -516,6 +524,8 @@
     timingInputs.afterReset = iAfter;
     const iGap = el("input", { class: "sm", value: String(TIMING.gap) });
     timingInputs.gap = iGap;
+    const iChar = el("input", { class: "sm", value: String(TIMING.char) });
+    timingInputs.char = iChar;
     const iBase = el("input", { class: "sm", value: String(AUTO_BASE) });
     const iStep = el("input", { class: "sm", value: String(AUTO_STEP) });
     const iLvl = el("input", { class: "sm", value: "380" });
@@ -524,7 +534,7 @@
     const iErr = el("input", { class: "sm", value: "12" });
     const iThr = el("input", { class: "sm", value: "0" });
     const iLost = el("input", { class: "sm", value: "5" });
-    [iCmd, iAfter, iGap, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
+    [iCmd, iAfter, iGap, iChar, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
     const readMax = () => +iMax.value || 400;
     const readErr = () => (+iErr.value || 12) / 100;
     const readThr = () => +iThr.value || 0;
@@ -542,7 +552,7 @@
           return;
         }
         focusGame();
-        chatCommand(`/${k} ${v}`);
+        chatCommand(`/${k} ${v}`, { charDelay: +iChar.value || 12 });
         log(`/${k} ${v}`);
       } }, "го");
       return el(
@@ -575,7 +585,7 @@
     } }, "📷");
     const bSend = el("button", { onclick: () => {
       focusGame();
-      chatCommand(iCmd.value);
+      chatCommand(iCmd.value, { charDelay: +iChar.value || 12 });
     } }, "send");
     const bMacro = el("button", { class: "big", onclick: () => {
       log("RESET MZFK...");
@@ -879,6 +889,7 @@
       { class: "pane" },
       sec("паузы, мс"),
       el("div", { class: "row" }, lbl("после reset"), iAfter, lbl("между"), iGap),
+      el("div", { class: "row" }, lbl("печать мс/симв"), iChar),
       sec("авто, сек"),
       el("div", { class: "row" }, lbl("база"), iBase, lbl("+ за ресет"), iStep),
       countEl,
@@ -957,6 +968,7 @@
       cmd: iCmd,
       after: iAfter,
       gap: iGap,
+      char: iChar,
       base: iBase,
       step: iStep,
       lvl: iLvl,
