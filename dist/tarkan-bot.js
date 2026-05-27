@@ -1,4 +1,4 @@
-// tarkan-bot v1.7.0 — собрано из src/. Вставить целиком в консоль DevTools (F12).
+// tarkan-bot v1.7.1 — собрано из src/. Вставить целиком в консоль DevTools (F12).
 (() => {
   // src/keyboard.js
   var TARGET = typeof document !== "undefined" && document.getElementById("canvas") || (typeof window !== "undefined" ? window : null);
@@ -514,6 +514,10 @@
     timingInputs.gap = iGap;
     const iChar = el("input", { class: "sm", value: String(TIMING.char) });
     timingInputs.char = iChar;
+    const iOpen = el("input", { class: "sm", value: String(TIMING.open) });
+    timingInputs.open = iOpen;
+    const iSend = el("input", { class: "sm", value: String(TIMING.send) });
+    timingInputs.send = iSend;
     const iBase = el("input", { class: "sm", value: String(AUTO_BASE) });
     const iStep = el("input", { class: "sm", value: String(AUTO_STEP) });
     const iLvl = el("input", { class: "sm", value: "380" });
@@ -522,7 +526,7 @@
     const iErr = el("input", { class: "sm", value: "12" });
     const iThr = el("input", { class: "sm", value: "0" });
     const iLost = el("input", { class: "sm", value: "5" });
-    [iCmd, iAfter, iGap, iChar, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
+    [iCmd, iAfter, iGap, iChar, iOpen, iSend, iBase, iStep, iLvl, iMax, iPoll, iErr, iThr, iLost].forEach(makeEditable);
     const readMax = () => +iMax.value || 400;
     const readErr = () => (+iErr.value || 12) / 100;
     const readThr = () => +iThr.value || 0;
@@ -870,14 +874,14 @@
       statRow("e"),
       statRow("f"),
       statRow("v"),
-      bMacro
+      bMacro,
+      sec("тайминги, мс"),
+      el("div", { class: "row" }, lbl("после reset"), iAfter, lbl("между"), iGap),
+      el("div", { class: "row" }, lbl("печать"), iChar, lbl("откр"), iOpen, lbl("отпр"), iSend)
     );
     const paneTimer = el(
       "div",
       { class: "pane" },
-      sec("паузы, мс"),
-      el("div", { class: "row" }, lbl("после reset"), iAfter, lbl("между"), iGap),
-      el("div", { class: "row" }, lbl("печать мс/симв"), iChar),
       sec("авто, сек"),
       el("div", { class: "row" }, lbl("база"), iBase, lbl("+ за ресет"), iStep),
       countEl,
@@ -957,6 +961,8 @@
       after: iAfter,
       gap: iGap,
       char: iChar,
+      open: iOpen,
+      send: iSend,
       base: iBase,
       step: iStep,
       lvl: iLvl,

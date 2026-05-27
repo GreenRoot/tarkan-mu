@@ -6,7 +6,7 @@
 // ============================================================================
 import * as esbuild from 'esbuild';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 
 const consoleBanner = `// tarkan-bot v${VERSION} — собрано из src/. Вставить целиком в консоль DevTools (F12).`;
 
